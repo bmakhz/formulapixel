@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import {
   getDrivers, getLaps, getPositions, getSessions, getWeather,
-  getStints, getIntervals, getMeetings,
+  getStints, getIntervals, getMeetings, getSessionResult,
   getDriverChampionshipStandings, getConstructorChampionshipStandings, getLastRaceResults,
 } from '../services/api/openf1-client';
 
@@ -70,6 +70,14 @@ type IntervalPoint = {
   date?: string;
 };
 
+type SessionResultPoint = {
+  driver_number: number;
+  position?: number;
+  dnf?: boolean;
+  dns?: boolean;
+  dsq?: boolean;
+};
+
 export type LeaderboardRow = {
   driverNumber: number;
   position: number;
@@ -86,6 +94,10 @@ export type LeaderboardRow = {
   compound: string;
   tireAge: number;
   pits: number;
+  status: 'RUN' | 'DNF' | 'DNS' | 'DSQ';
+  dnf: boolean;
+  dns: boolean;
+  dsq: boolean;
 };
 
 export type DriverStanding = {
@@ -112,6 +124,15 @@ export type LastRaceResult = {
   short: string;
   team: string;
   teamColor: string;
+  status: string;
+};
+
+export type LastRaceSummary = {
+  raceName: string;
+  country: string;
+  round: number | null;
+  date: string;
+  results: LastRaceResult[];
 };
 
 // ── Team colour map for Jolpica data ──────────────────────────
@@ -220,18 +241,26 @@ export function useConstructorStandings() {
 
 export function useLastRaceResults() {
   const year = new Date().getFullYear();
-  return useQuery<LastRaceResult[]>({
+  return useQuery<LastRaceSummary>({
     queryKey: ['jolpika-last-race', year],
     queryFn: async () => {
       const data = await getLastRaceResults(year);
-      const results = data?.MRData?.RaceTable?.Races?.[0]?.Results ?? [];
-      return results.slice(0, 10).map((item: any) => ({
+      const race = data?.MRData?.RaceTable?.Races?.[0] ?? null;
+      const results = race?.Results ?? [];
+      return {
+        raceName: race?.raceName ?? 'LAST RACE',
+        country: race?.Circuit?.Location?.country ?? race?.raceName ?? 'Grand Prix',
+        round: race?.round != null ? Number(race.round) : null,
+        date: race?.date ?? '',
+        results: results.slice(0, 20).map((item: any) => ({
         pos: Number(item.position),
         name: `${item.Driver?.givenName ?? ''} ${item.Driver?.familyName ?? ''}`.trim(),
         short: item.Driver?.code ?? item.Driver?.familyName?.slice(0, 3).toUpperCase() ?? '---',
         team: item.Constructor?.name ?? 'Unknown',
         teamColor: getTeamColor(item.Constructor?.name ?? ''),
-      }));
+        status: item.status ?? 'Finished',
+      })),
+      };
     },
     refetchInterval: 300000,
     staleTime: 60000,
@@ -253,8 +282,8 @@ export function useAllSessions() {
 export function useRaceSessions() {
   const year = new Date().getFullYear();
   return useQuery({
-    queryKey: ['sessions', 'race-year', year],
-    queryFn: () => getSessions({ year, session_type: 'Race' }),
+    queryKey: ['sessions', 'all-year', year],
+    queryFn: () => getSessions({ year }),
     refetchInterval: 60000,
   });
 }
@@ -265,9 +294,34 @@ export function useActiveRaceSession() {
   const data = useMemo(() => {
     const now = Date.now();
     const sessions = (Array.isArray(sessionsQuery.data) ? sessionsQuery.data : []) as RaceSession[];
-    const races = sessions
+    const ordered = [...sessions].sort((a, b) => parseDate(a.date_start) - parseDate(b.date_start));
+    const races = ordered
       .filter((session) => session.session_type === 'Race')
       .sort((a, b) => parseDate(a.date_start) - parseDate(b.date_start));
+
+    const liveSessions = ordered.filter((session) => {
+      const start = parseDate(session.date_start);
+      const end = parseDate(session.date_end);
+      return start > 0 && end > 0 && start <= now && now <= end;
+    });
+
+    const sessionPriority: Record<string, number> = {
+      Race: 6,
+      Sprint: 5,
+      Qualifying: 4,
+      'Sprint Shootout': 3,
+      'Sprint Qualifying': 3,
+      'Practice 3': 2,
+      'Practice 2': 1,
+      'Practice 1': 0,
+    };
+
+    const liveAny = [...liveSessions].sort((a, b) => {
+      const pa = sessionPriority[a.session_type ?? ''] ?? -1;
+      const pb = sessionPriority[b.session_type ?? ''] ?? -1;
+      if (pb !== pa) return pb - pa;
+      return parseDate(b.date_start) - parseDate(a.date_start);
+    })[0];
 
     const live = races.find((session) => {
       const start = parseDate(session.date_start);
@@ -277,15 +331,24 @@ export function useActiveRaceSession() {
 
     const next = races.find((session) => parseDate(session.date_start) > now);
 
+    const nextAny = ordered.find((session) => parseDate(session.date_start) > now) ?? null;
+
     const latestPast = [...races]
       .filter((session) => parseDate(session.date_end) <= now)
       .sort((a, b) => parseDate(b.date_end) - parseDate(a.date_end))[0];
 
+    const latestPastAny = [...ordered]
+      .filter((session) => parseDate(session.date_end) <= now)
+      .sort((a, b) => parseDate(b.date_end) - parseDate(a.date_end))[0];
+
     return {
+      sessions: ordered,
       races,
       liveRace: live ?? null,
+      liveSession: liveAny ?? null,
       nextRace: next ?? null,
-      activeRace: live ?? latestPast ?? races[0] ?? null,
+      nextSession: nextAny,
+      activeRace: liveAny ?? latestPastAny ?? nextAny ?? latestPast ?? races[0] ?? null,
       latestPastRace: latestPast ?? null,
     };
   }, [sessionsQuery.data]);
@@ -340,6 +403,13 @@ export function useLiveRaceData(sessionKey: number | null) {
     queryFn: () => getIntervals({ session_key: sessionKey as number }),
     enabled,
     refetchInterval: 3000,
+  });
+
+  const sessionResultQuery = useQuery({
+    queryKey: ['session-result', sessionKey],
+    queryFn: () => getSessionResult({ session_key: sessionKey as number }),
+    enabled,
+    refetchInterval: 30000,
   });
 
   const rows = useMemo(() => {
@@ -403,15 +473,30 @@ export function useLiveRaceData(sessionKey: number | null) {
       }
     }
 
+    const sessionResults = (Array.isArray(sessionResultQuery.data) ? sessionResultQuery.data : []) as SessionResultPoint[];
+    const sessionResultByDriver = new Map<number, SessionResultPoint>();
+    for (const result of sessionResults) {
+      if (!sessionResultByDriver.has(result.driver_number)) {
+        sessionResultByDriver.set(result.driver_number, result);
+      }
+    }
+
+    const allDriverNumbers = new Set<number>([
+      ...driversData.map((d) => d.driver_number),
+      ...latestPositionByDriver.keys(),
+    ]);
+
     const mergedRows: LeaderboardRow[] = [];
-    latestPositionByDriver.forEach((positionPoint, driverNumber) => {
+    allDriverNumbers.forEach((driverNumber) => {
+      const positionPoint = latestPositionByDriver.get(driverNumber);
       const driver = driverMap.get(driverNumber);
       const lap = latestLapByDriver.get(driverNumber);
       const bestLap = bestLapByDriver.get(driverNumber);
       const stint = currentStintByDriver.get(driverNumber);
       const pits = pitsByDriver.get(driverNumber) ?? 0;
       const interval = latestIntervalByDriver.get(driverNumber);
-      const position = positionPoint.position ?? 999;
+      const position = positionPoint?.position ?? 999;
+      const hasLivePosition = typeof positionPoint?.position === 'number';
 
       const lapStart = stint?.lap_start ?? 0;
       const currentLapNum = lap?.lap_number ?? 0;
@@ -435,6 +520,17 @@ export function useLiveRaceData(sessionKey: number | null) {
         gapToLeader = gl != null ? `+${typeof gl === 'number' ? gl.toFixed(3) : gl}` : '--';
       }
 
+      const official = sessionResultByDriver.get(driverNumber);
+      const dns = !!official?.dns;
+      const dsq = !!official?.dsq;
+      const dnf = !!official?.dnf;
+      const status: LeaderboardRow['status'] = dsq ? 'DSQ' : dns ? 'DNS' : dnf ? 'DNF' : 'RUN';
+
+      if (status !== 'RUN') {
+        gapToLeader = status;
+        gapToNext = status;
+      }
+
       mergedRows.push({
         driverNumber,
         position,
@@ -455,11 +551,21 @@ export function useLiveRaceData(sessionKey: number | null) {
         compound: stint?.compound ?? '--',
         tireAge: Math.max(0, tireAge),
         pits,
+        status,
+        dnf,
+        dns,
+        dsq,
       });
     });
 
-    return mergedRows.sort((a, b) => a.position - b.position);
-  }, [positionsQuery.data, driversQuery.data, lapsQuery.data, stintsQuery.data, intervalsQuery.data]);
+    return mergedRows.sort((a, b) => {
+      const rank = (row: LeaderboardRow) => (row.status === 'RUN' ? 0 : row.status === 'DNF' ? 1 : row.status === 'DNS' ? 2 : 3);
+      const ra = rank(a);
+      const rb = rank(b);
+      if (ra !== rb) return ra - rb;
+      return a.position - b.position;
+    });
+  }, [positionsQuery.data, driversQuery.data, lapsQuery.data, stintsQuery.data, intervalsQuery.data, sessionResultQuery.data]);
 
   const currentLap = useMemo(() => {
     if (!rows.length) return null;

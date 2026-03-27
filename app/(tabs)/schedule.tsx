@@ -1,11 +1,17 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
-  View, Text, FlatList, StyleSheet,
-  TouchableOpacity, StatusBar,
+  FlatList,
+  Image,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useAllSessions, getRaceStatus, parseDate } from "../../hooks/useOpenF1";
-import { C, px } from "../../components/theme";
+import { getRaceStatus, parseDate, useAllSessions } from "../../hooks/useOpenF1";
+import { useThemeTokens } from "../../components/theme";
+import { trackOutlineSource } from "../../utils/imageMaps";
 
 const COUNTRY_FLAGS: Record<string, string> = {
   "Australia": "🇦🇺", "Bahrain": "🇧🇭", "Saudi Arabia": "🇸🇦", "Japan": "🇯🇵",
@@ -16,21 +22,15 @@ const COUNTRY_FLAGS: Record<string, string> = {
   "Las Vegas": "🇺🇸", "Qatar": "🇶🇦", "Abu Dhabi": "🇦🇪",
 };
 
-// Known sprint weekends for 2025 season (country names)
-const SPRINT_WEEKENDS = new Set([
-  "China", "Miami", "Belgium", "United States", "Brazil", "Qatar",
-]);
-
-// Session type display info
-const SESSION_DISPLAY: Record<string, { label: string; color: string }> = {
-  "Practice 1": { label: "FP1", color: "#4488ff" },
-  "Practice 2": { label: "FP2", color: "#4488ff" },
-  "Practice 3": { label: "FP3", color: "#4488ff" },
-  "Sprint Shootout": { label: "SQ", color: "#ff6600" },
-  "Sprint Qualifying": { label: "SQ", color: "#ff6600" },
-  "Sprint": { label: "SPR", color: "#ff6600" },
-  "Qualifying": { label: "QUAL", color: C.yellow },
-  "Race": { label: "RACE", color: C.accent },
+const SESSION_DISPLAY_BY_NAME: Record<string, { label: string; colorKey: "accent" | "yellow" | "cyan" | "grey" }> = {
+  "Practice 1": { label: "FP1", colorKey: "cyan" },
+  "Practice 2": { label: "FP2", colorKey: "cyan" },
+  "Practice 3": { label: "FP3", colorKey: "cyan" },
+  "Sprint Shootout": { label: "SQ", colorKey: "accent" },
+  "Sprint Qualifying": { label: "SQ", colorKey: "accent" },
+  "Sprint": { label: "SPR", colorKey: "accent" },
+  "Qualifying": { label: "QUAL", colorKey: "yellow" },
+  "Race": { label: "RACE", colorKey: "accent" },
 };
 
 type SessionItem = {
@@ -51,6 +51,7 @@ type RaceWeekend = {
   roundNum: number;
   country: string;
   circuit: string;
+  location: string;
   flag: string;
   isSprint: boolean;
   status: "live" | "done" | "upcoming";
@@ -58,7 +59,14 @@ type RaceWeekend = {
   earliestDate: string;
 };
 
-function SessionBadge({ label, color, status }: { label: string; color: string; status: "live" | "done" | "upcoming" }) {
+function sessionDisplay(s: SessionItem, C: any) {
+  const byName = SESSION_DISPLAY_BY_NAME[s.session_name ?? ""];
+  if (byName) return { label: byName.label, color: C[byName.colorKey] ?? C.grey };
+  const fallback = (s.session_name ?? s.session_type ?? "?").slice(0, 4).toUpperCase();
+  return { label: fallback, color: C.grey };
+}
+
+function SessionBadge({ label, color, status, C, px, styles }: { label: string; color: string; status: "live" | "done" | "upcoming"; C: any; px: any; styles: any }) {
   const isDone = status === "done";
   const isLive = status === "live";
   return (
@@ -73,48 +81,43 @@ function SessionBadge({ label, color, status }: { label: string; color: string; 
   );
 }
 
-function WeekendCard({
-  item, expanded, onPress,
-}: { item: RaceWeekend; expanded: boolean; onPress: () => void }) {
+function WeekendCard({ item, expanded, onPress, C, px, styles, mode }: { item: RaceWeekend; expanded: boolean; onPress: () => void; C: any; px: any; styles: any; mode: "dark" | "light" }) {
   const isDone = item.status === "done";
   const isLive = item.status === "live";
   const borderColor = isLive ? C.accent : isDone ? C.border : C.borderBright;
-  const bg = isLive ? "#1a0005" : isDone ? C.bgPanel : C.bgCard;
+  const bg = isLive ? C.accentDim : isDone ? C.bgPanel : C.bgCard;
+  const track = trackOutlineSource(mode, item.country, item.location, item.circuit);
 
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
       <View style={[styles.card, { borderColor, backgroundColor: bg }]}>
-        {/* Left accent */}
         <View style={[styles.accent, { backgroundColor: isLive ? C.accent : isDone ? C.greyDark : C.borderBright }]} />
-
         <View style={styles.cardMain}>
-          {/* Top row */}
           <View style={styles.cardTop}>
             <View style={styles.roundBox}>
               <Text style={[px.label, { color: C.grey, fontSize: 5 }]}>RND</Text>
               <Text style={[px.h2, { color: C.white }]}>{String(item.roundNum).padStart(2, "0")}</Text>
             </View>
-
+            {track && <Image source={track} style={styles.trackOutline} resizeMode="contain" />}
             <Text style={{ fontSize: 22 }}>{item.flag}</Text>
-
             <View style={styles.nameBlock}>
               <View style={styles.nameRow}>
                 <Text style={[px.h3, { color: isLive ? C.accent : isDone ? C.grey : C.white }]}>
                   {item.country.toUpperCase().slice(0, 14)}
                 </Text>
                 {item.isSprint && (
-                  <View style={styles.sprintBadge}>
+                  <View style={[styles.sprintBadge, { backgroundColor: C.accent }]}>
                     <Text style={[px.label, { color: C.bg, fontSize: 4 }]}>SPRINT</Text>
                   </View>
                 )}
                 {isLive && (
-                  <View style={styles.livePill}>
-                    <View style={styles.livePillDot} />
+                  <View style={[styles.livePill, { backgroundColor: C.accent }]}>
+                    <View style={[styles.livePillDot, { backgroundColor: C.bg }]} />
                     <Text style={[px.label, { color: C.bg, fontSize: 4 }]}>LIVE</Text>
                   </View>
                 )}
                 {isDone && (
-                  <View style={styles.donePill}>
+                  <View style={[styles.donePill, { borderColor: C.green }]}>
                     <Text style={[px.label, { color: C.green, fontSize: 5 }]}>✓</Text>
                   </View>
                 )}
@@ -128,19 +131,17 @@ function WeekendCard({
                   : "TBA"}
               </Text>
             </View>
-
             <Text style={[px.label, { color: C.grey }]}>{expanded ? "▲" : "▼"}</Text>
           </View>
 
-          {/* Expanded sessions */}
           {expanded && (
-            <View style={styles.sessionsRow}>
+            <View style={[styles.sessionsRow, { borderTopColor: C.border }]}> 
               {item.sessions.map((s) => {
                 const now = Date.now();
                 const sStatus = getRaceStatus(s, now);
-                const info = SESSION_DISPLAY[s.session_name ?? ""] ?? { label: (s.session_name ?? "?").slice(0, 4).toUpperCase(), color: C.grey };
+                const info = sessionDisplay(s, C);
                 return (
-                  <SessionBadge key={s.session_key} label={info.label} color={info.color} status={sStatus} />
+                  <SessionBadge key={s.session_key} label={info.label} color={info.color} status={sStatus} C={C} px={px} styles={styles} />
                 );
               })}
             </View>
@@ -152,15 +153,16 @@ function WeekendCard({
 }
 
 export default function ScheduleScreen() {
+  const { C, px, statusBarStyle, mode, scaleValue } = useThemeTokens();
+  const styles = React.useMemo(() => createStyles(C, scaleValue), [C, scaleValue]);
   const allSessionsQuery = useAllSessions();
   const [expanded, setExpanded] = useState<number | null>(null);
   const now = Date.now();
 
   const weekends = useMemo(() => {
     const sessions = (Array.isArray(allSessionsQuery.data) ? allSessionsQuery.data : []) as SessionItem[];
-
-    // Group by meeting_key
     const meetingMap = new Map<number, SessionItem[]>();
+
     for (const s of sessions) {
       const key = s.meeting_key ?? 0;
       if (!meetingMap.has(key)) meetingMap.set(key, []);
@@ -171,22 +173,21 @@ export default function ScheduleScreen() {
     let roundNum = 0;
 
     for (const [meetingKey, meetingSessions] of meetingMap) {
-      // Only include meetings that have a Race session
       const hasRace = meetingSessions.some((s) => s.session_type === "Race");
       if (!hasRace) continue;
-
       roundNum++;
 
-      // Sort sessions by date
       const sorted = [...meetingSessions].sort((a, b) => parseDate(a.date_start) - parseDate(b.date_start));
       const first = sorted[0];
       const country = first?.country_name ?? first?.meeting_name ?? "Grand Prix";
       const circuit = first?.circuit_short_name ?? first?.location ?? "Circuit";
-      const isSprint = SPRINT_WEEKENDS.has(country) || meetingSessions.some((s) =>
-        s.session_type === "Sprint" || s.session_name?.toLowerCase().includes("sprint")
+      const location = first?.location ?? "";
+      const isSprint = meetingSessions.some((s) =>
+        s.session_type === "Sprint" ||
+        s.session_type === "Sprint Shootout" ||
+        s.session_type === "Sprint Qualifying" ||
+        s.session_name?.toLowerCase().includes("sprint")
       );
-
-      // Overall weekend status = status of Race session
       const raceSession = meetingSessions.find((s) => s.session_type === "Race");
       const weekendStatus = raceSession ? getRaceStatus(raceSession, now) : "upcoming";
 
@@ -195,6 +196,7 @@ export default function ScheduleScreen() {
         roundNum,
         country,
         circuit,
+        location,
         flag: COUNTRY_FLAGS[country] ?? "🏁",
         isSprint,
         status: weekendStatus,
@@ -204,9 +206,8 @@ export default function ScheduleScreen() {
     }
 
     return result.sort((a, b) => parseDate(a.earliestDate) - parseDate(b.earliestDate));
-  }, [allSessionsQuery.data]);
+  }, [allSessionsQuery.data, now]);
 
-  // Auto-expand live weekend
   React.useEffect(() => {
     const live = weekends.find((w) => w.status === "live");
     if (live) setExpanded(live.meetingKey);
@@ -217,10 +218,9 @@ export default function ScheduleScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle={statusBarStyle} backgroundColor={C.bg} />
 
-      {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: C.accent }]}>
         <Text style={[px.h1]}>SCHEDULE</Text>
         <View>
           <Text style={[px.label, { color: C.accent }]}>{done}/{total}</Text>
@@ -228,13 +228,16 @@ export default function ScheduleScreen() {
         </View>
       </View>
 
-      {/* Pixel progress bar */}
       {weekends.length > 0 && (
-        <View style={styles.progressBar}>
+        <View style={[styles.progressBar, { backgroundColor: C.bgPanel, borderBottomColor: C.border }]}>
           {weekends.map((w) => (
-            <View key={w.meetingKey} style={[styles.progressSeg, {
-              backgroundColor: w.status === "done" ? C.green : w.status === "live" ? C.accent : C.border,
-            }]} />
+            <View
+              key={w.meetingKey}
+              style={[
+                styles.progressSeg,
+                { backgroundColor: w.status === "done" ? C.green : w.status === "live" ? C.accent : C.border },
+              ]}
+            />
           ))}
         </View>
       )}
@@ -252,6 +255,10 @@ export default function ScheduleScreen() {
               item={item}
               expanded={expanded === item.meetingKey}
               onPress={() => setExpanded(expanded === item.meetingKey ? null : item.meetingKey)}
+              C={C}
+              px={px}
+              styles={styles}
+              mode={mode}
             />
           )}
           showsVerticalScrollIndicator={false}
@@ -262,35 +269,41 @@ export default function ScheduleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: C.bg },
-  header: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    padding: 16, paddingBottom: 10,
-    borderBottomWidth: 2, borderBottomColor: C.accent,
-  },
-  progressBar: {
-    flexDirection: "row", gap: 2,
-    paddingHorizontal: 10, paddingVertical: 8,
-    backgroundColor: C.bgPanel,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  progressSeg: { flex: 1, height: 8 },
-
-  card: { borderWidth: 2, flexDirection: "row", overflow: "hidden" },
-  accent: { width: 4 },
-  cardMain: { flex: 1, padding: 10 },
-  cardTop: { flexDirection: "row", alignItems: "center", gap: 10 },
-  roundBox: { alignItems: "center", width: 30 },
-  nameBlock: { flex: 1 },
-  nameRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
-
-  sprintBadge: { backgroundColor: "#ff6600", paddingHorizontal: 4, paddingVertical: 2 },
-  livePill: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: C.accent, paddingHorizontal: 4, paddingVertical: 2 },
-  livePillDot: { width: 4, height: 4, backgroundColor: C.bg },
-  donePill: { borderWidth: 1, borderColor: C.green, paddingHorizontal: 4, paddingVertical: 1 },
-
-  sessionsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: C.border },
-  sessionBadge: { borderWidth: 1, paddingHorizontal: 6, paddingVertical: 4, minWidth: 38, alignItems: "center", position: "relative" },
-  sessionLiveDot: { position: "absolute", top: 2, right: 2, width: 4, height: 4 },
-});
+function createStyles(C: any, scale: number) {
+  const s = Math.max(0.9, Math.min(1.2, scale));
+  const m = (n: number) => Math.round(n * s);
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: C.bg },
+    header: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: m(16),
+      paddingBottom: m(10),
+      borderBottomWidth: 2,
+    },
+    progressBar: {
+      flexDirection: "row",
+      gap: 2,
+      paddingHorizontal: m(10),
+      paddingVertical: m(8),
+      borderBottomWidth: 1,
+    },
+    progressSeg: { flex: 1, height: m(8) },
+    card: { borderWidth: 2, flexDirection: "row", overflow: "hidden" },
+    accent: { width: 4 },
+    cardMain: { flex: 1, padding: m(10) },
+    cardTop: { flexDirection: "row", alignItems: "center", gap: m(10) },
+    roundBox: { alignItems: "center", width: m(30) },
+    trackOutline: { width: m(54), height: m(28) },
+    nameBlock: { flex: 1 },
+    nameRow: { flexDirection: "row", alignItems: "center", gap: m(6), flexWrap: "wrap" },
+    sprintBadge: { paddingHorizontal: m(4), paddingVertical: m(2) },
+    livePill: { flexDirection: "row", alignItems: "center", gap: m(3), paddingHorizontal: m(4), paddingVertical: m(2) },
+    livePillDot: { width: 4, height: 4 },
+    donePill: { borderWidth: 1, paddingHorizontal: m(4), paddingVertical: m(1) },
+    sessionsRow: { flexDirection: "row", flexWrap: "wrap", gap: m(6), marginTop: m(10), paddingTop: m(8), borderTopWidth: 1 },
+    sessionBadge: { borderWidth: 1, paddingHorizontal: m(6), paddingVertical: m(4), minWidth: m(38), alignItems: "center", position: "relative" },
+    sessionLiveDot: { position: "absolute", top: 2, right: 2, width: 4, height: 4 },
+  });
+}

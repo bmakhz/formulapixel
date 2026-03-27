@@ -1,16 +1,21 @@
 import { Tabs } from "expo-router";
 import { View, Text, StyleSheet } from "react-native";
-import { C } from "../../components/theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useThemeTokens } from "../../components/theme";
+import { useActiveRaceSession, getRaceStatus } from "../../hooks/useOpenF1";
 
 function PixelTabIcon({
   label,
   focused,
   isLive,
+  C,
 }: {
   label: string;
   focused: boolean;
   isLive?: boolean;
+  C: any;
 }) {
+  const styles = createStyles(C, 0);
   return (
     <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
       {isLive && (
@@ -28,6 +33,12 @@ function PixelTabIcon({
 }
 
 export default function TabsLayout() {
+  const { C } = useThemeTokens();
+  const insets = useSafeAreaInsets();
+  const raceSessions = useActiveRaceSession();
+  const isRaceLive = !!(raceSessions.liveRace && getRaceStatus(raceSessions.liveRace, Date.now()) === "live");
+  const styles = createStyles(C, insets.bottom);
+
   return (
     <Tabs
       screenOptions={{
@@ -41,7 +52,7 @@ export default function TabsLayout() {
         name="index"
         options={{
           tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="HOME" focused={focused} />
+            <PixelTabIcon label="HOME" focused={focused} C={C} />
           ),
         }}
       />
@@ -49,7 +60,7 @@ export default function TabsLayout() {
         name="live"
         options={{
           tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="LIVE" focused={focused} isLive />
+            <PixelTabIcon label="LIVE" focused={focused} isLive={isRaceLive} C={C} />
           ),
         }}
       />
@@ -57,7 +68,7 @@ export default function TabsLayout() {
         name="standings"
         options={{
           tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="STND" focused={focused} />
+            <PixelTabIcon label="STND" focused={focused} C={C} />
           ),
         }}
       />
@@ -65,7 +76,7 @@ export default function TabsLayout() {
         name="schedule"
         options={{
           tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="RACE" focused={focused} />
+            <PixelTabIcon label="RACE" focused={focused} C={C} />
           ),
         }}
       />
@@ -73,7 +84,7 @@ export default function TabsLayout() {
         name="settings"
         options={{
           tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="SET" focused={focused} />
+            <PixelTabIcon label="SET" focused={focused} C={C} />
           ),
         }}
       />
@@ -81,13 +92,14 @@ export default function TabsLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(C: any, bottomInset: number) {
+  return StyleSheet.create({
   tabBar: {
     backgroundColor: C.bgPanel,
     borderTopWidth: 2,
     borderTopColor: C.accent,
-    height: 72,
-    paddingBottom: 0,
+    height: 62 + bottomInset,
+    paddingBottom: Math.max(6, bottomInset),
     paddingTop: 0,
   },
   tabBarBg: {
@@ -134,4 +146,5 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: C.white,
   },
-});
+  });
+}

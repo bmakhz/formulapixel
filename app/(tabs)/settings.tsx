@@ -1,13 +1,26 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   View, Text, ScrollView, StyleSheet,
   TouchableOpacity, StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { C, px } from "../../components/theme";
+import { useThemeTokens } from "../../components/theme";
+import { useSettingsStore } from "../../store/useSettingsStore";
 
 // ── Pixel switch ─────────────────────────────────────────────────
-function PixelSwitch({ value, onValueChange }: { value: boolean; onValueChange: (v: boolean) => void }) {
+function PixelSwitch({
+  value,
+  onValueChange,
+  C,
+  px,
+  styles,
+}: {
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  C: any;
+  px: any;
+  styles: any;
+}) {
   return (
     <TouchableOpacity
       style={[styles.pSwitch, { borderColor: value ? C.accent : C.border }]}
@@ -23,7 +36,7 @@ function PixelSwitch({ value, onValueChange }: { value: boolean; onValueChange: 
 }
 
 // ── Section header ───────────────────────────────────────────────
-function SectionHeader({ title }: { title: string }) {
+function SectionHeader({ title, C, px, styles }: { title: string; C: any; px: any; styles: any }) {
   return (
     <View style={styles.sectionHeader}>
       <Text style={[px.label, { color: C.accent }]}>// {title}</Text>
@@ -34,12 +47,15 @@ function SectionHeader({ title }: { title: string }) {
 
 // ── Setting row ──────────────────────────────────────────────────
 function SettingRow({
-  label, sub, value, onToggle,
+  label, sub, value, onToggle, C, px, styles,
 }: {
   label: string;
   sub?: string;
   value: boolean;
   onToggle: (v: boolean) => void;
+  C: any;
+  px: any;
+  styles: any;
 }) {
   return (
     <View style={styles.settingRow}>
@@ -47,24 +63,59 @@ function SettingRow({
         <Text style={[px.h3, { color: C.white }]}>{label}</Text>
         {sub && <Text style={[px.label, { color: C.greyDark, marginTop: 3, fontSize: 5 }]}>{sub}</Text>}
       </View>
-      <PixelSwitch value={value} onValueChange={onToggle} />
+      <PixelSwitch value={value} onValueChange={onToggle} C={C} px={px} styles={styles} />
     </View>
   );
 }
 
+function SelectRow({
+  label,
+  value,
+  onPress,
+  C,
+  px,
+  styles,
+}: {
+  label: string;
+  value: string;
+  onPress: () => void;
+  C: any;
+  px: any;
+  styles: any;
+}) {
+  return (
+    <TouchableOpacity style={styles.settingRow} onPress={onPress} activeOpacity={0.8}>
+      <View style={styles.settingLeft}>
+        <Text style={[px.h3, { color: C.white }]}>{label}</Text>
+      </View>
+      <View style={[styles.selector, { borderColor: C.borderBright, backgroundColor: C.bgPanel }]}>
+        <Text style={[px.label, { color: C.accent }]}>{value}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 export default function SettingsScreen() {
-  const [darkMode,        setDarkMode]        = useState(true);
-  const [showInterval,    setShowInterval]    = useState(false);
-  const [showDNF,         setShowDNF]         = useState(true);
-  const [showMiniSectors, setShowMiniSectors] = useState(true);
-  const [showWeather,     setShowWeather]     = useState(true);
-  const [notifications,   setNotifications]   = useState(true);
-  const [sessionAlerts,   setSessionAlerts]   = useState(true);
-  const [scAlerts,        setScAlerts]        = useState(false);
+  const { C, px, statusBarStyle } = useThemeTokens();
+  const styles = React.useMemo(() => createStyles(C), [C]);
+  const mode = useSettingsStore((s) => s.mode);
+  const scale = useSettingsStore((s) => s.scale);
+  const speedUnit = useSettingsStore((s) => s.speedUnit);
+  const temperatureUnit = useSettingsStore((s) => s.temperatureUnit);
+  const setMode = useSettingsStore((s) => s.setMode);
+  const setScale = useSettingsStore((s) => s.setScale);
+  const setSpeedUnit = useSettingsStore((s) => s.setSpeedUnit);
+  const setTemperatureUnit = useSettingsStore((s) => s.setTemperatureUnit);
+
+  const nextScale = () => {
+    if (scale === "small") return setScale("normal");
+    if (scale === "normal") return setScale("large");
+    return setScale("small");
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle={statusBarStyle} backgroundColor={C.bg} />
 
       {/* Header */}
       <View style={styles.header}>
@@ -74,72 +125,49 @@ export default function SettingsScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
         {/* ── Display ── */}
-        <SectionHeader title="DISPLAY" />
+        <SectionHeader title="DISPLAY" C={C} px={px} styles={styles} />
         <View style={styles.card}>
           <SettingRow
             label="DARK MODE"
-            sub="ALWAYS ON BY DEFAULT"
-            value={darkMode}
-            onToggle={setDarkMode}
+            sub="TOGGLE LIGHT / DARK UI"
+            value={mode === "dark"}
+            onToggle={(v) => setMode(v ? "dark" : "light")}
+            C={C}
+            px={px}
+            styles={styles}
           />
           <View style={styles.cardSep} />
-          <SettingRow
-            label="SHOW INTERVAL"
-            sub="GAP TO CAR AHEAD VS LEADER"
-            value={showInterval}
-            onToggle={setShowInterval}
+          <SelectRow
+            label="SCALE"
+            value={scale.toUpperCase()}
+            onPress={nextScale}
+            C={C}
+            px={px}
+            styles={styles}
           />
           <View style={styles.cardSep} />
-          <SettingRow
-            label="SHOW WEATHER BAR"
-            sub="AIR / TRACK TEMPS IN LIVE VIEW"
-            value={showWeather}
-            onToggle={setShowWeather}
+          <SelectRow
+            label="SPEED"
+            value={speedUnit === "kmh" ? "KM/H" : "MPH"}
+            onPress={() => setSpeedUnit(speedUnit === "kmh" ? "mph" : "kmh")}
+            C={C}
+            px={px}
+            styles={styles}
           />
           <View style={styles.cardSep} />
-          <SettingRow
-            label="MINI SECTORS"
-            sub="COLOUR-CODED SECTOR STRIP"
-            value={showMiniSectors}
-            onToggle={setShowMiniSectors}
-          />
-          <View style={styles.cardSep} />
-          <SettingRow
-            label="SHOW DNF DRIVERS"
-            sub="LIST RETIRED DRIVERS AT BOTTOM"
-            value={showDNF}
-            onToggle={setShowDNF}
-          />
-        </View>
-
-        {/* ── Notifications ── */}
-        <SectionHeader title="NOTIFICATIONS" />
-        <View style={styles.card}>
-          <SettingRow
-            label="PUSH NOTIFICATIONS"
-            sub="ALLOW APP TO SEND ALERTS"
-            value={notifications}
-            onToggle={setNotifications}
-          />
-          <View style={styles.cardSep} />
-          <SettingRow
-            label="SESSION START"
-            sub="FP / QUALIFYING / RACE ALERTS"
-            value={sessionAlerts}
-            onToggle={setSessionAlerts}
-          />
-          <View style={styles.cardSep} />
-          <SettingRow
-            label="SAFETY CAR"
-            sub="ALERT WHEN SC / VSC DEPLOYED"
-            value={scAlerts}
-            onToggle={setScAlerts}
+          <SelectRow
+            label="TEMPERATURE"
+            value={temperatureUnit}
+            onPress={() => setTemperatureUnit(temperatureUnit === "C" ? "F" : "C")}
+            C={C}
+            px={px}
+            styles={styles}
           />
         </View>
 
         {/* Disclaimer */}
         <View style={{ marginTop: 24, padding: 8, alignItems: "center" }}>
-          <Text style={[px.label, { color: "#2a2a2a", fontSize: 5, lineHeight: 10, textAlign: "center" }]}>
+          <Text style={[px.label, { color: C.greyDark, fontSize: 5, lineHeight: 10, textAlign: "center" }]}>
             UNOFFICIAL. NOT ASSOCIATED WITH FORMULA 1.{"\n"}
             DATA PROVIDED BY OPENF1 API & JOLPICA.
           </Text>
@@ -151,7 +179,8 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(C: any) {
+  return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   header: {
     padding: 16, paddingBottom: 12,
@@ -178,6 +207,14 @@ const styles = StyleSheet.create({
   },
   settingLeft: { flex: 1 },
 
+  selector: {
+    minWidth: 78,
+    borderWidth: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    alignItems: "center",
+  },
+
   pSwitch: {
     width: 40, height: 20,
     borderWidth: 2, borderRadius: 0,
@@ -189,4 +226,5 @@ const styles = StyleSheet.create({
     width: 12, height: 12,
     top: 2,
   },
-});
+  });
+}

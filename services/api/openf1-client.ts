@@ -51,6 +51,11 @@ export async function getCarData(params?: Record<string, string | number | boole
   return response.data;
 }
 
+export async function getSessionResult(params?: Record<string, string | number | boolean>) {
+  const response = await openF1Client.get('/session_result', { params });
+  return response.data;
+}
+
 // ── Jolpica (Ergast) API — for season standings ────────────────
 const jolpikaClient = axios.create({
   baseURL: 'https://api.jolpi.ca/ergast/f1/',

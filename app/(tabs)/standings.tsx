@@ -1,17 +1,19 @@
 import React, { useState } from "react";
 import {
   View, Text, FlatList, StyleSheet,
-  TouchableOpacity, StatusBar,
+  TouchableOpacity, StatusBar, Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDriverStandings, useConstructorStandings } from "../../hooks/useOpenF1";
-import { C, px } from "../../components/theme";
+import { useThemeTokens } from "../../components/theme";
+import { teamLogoSource } from "../../utils/imageMaps";
 
 type Tab = "drivers" | "constructors";
 
 const PODIUM_COLORS = ["#FFD700", "#C0C0C0", "#CD7F32"];
 
-function DriverRow({ item }: { item: { pos: number; name: string; short: string; team: string; teamColor: string; points: number; wins: number } }) {
+function DriverRow({ item, C, px, styles }: { item: { pos: number; name: string; short: string; team: string; teamColor: string; points: number; wins: number }; C: any; px: any; styles: any }) {
+  const logo = teamLogoSource(item.team);
   return (
     <View style={styles.row}>
       {/* Position */}
@@ -21,8 +23,11 @@ function DriverRow({ item }: { item: { pos: number; name: string; short: string;
         </Text>
       </View>
 
-      {/* Team stripe */}
-      <View style={[styles.stripe, { backgroundColor: item.teamColor }]} />
+      {logo ? (
+        <Image source={logo} style={styles.logo} resizeMode="contain" />
+      ) : (
+        <View style={[styles.stripe, { backgroundColor: item.teamColor }]} />
+      )}
 
       {/* Name + Team */}
       <View style={styles.nameCol}>
@@ -41,7 +46,8 @@ function DriverRow({ item }: { item: { pos: number; name: string; short: string;
   );
 }
 
-function ConstructorRow({ item }: { item: { pos: number; name: string; teamColor: string; points: number; wins: number } }) {
+function ConstructorRow({ item, C, px, styles }: { item: { pos: number; name: string; teamColor: string; points: number; wins: number }; C: any; px: any; styles: any }) {
+  const logo = teamLogoSource(item.name);
   return (
     <View style={styles.row}>
       <View style={[styles.posBox, { borderColor: item.pos <= 3 ? PODIUM_COLORS[item.pos - 1] : C.border }]}>
@@ -49,7 +55,11 @@ function ConstructorRow({ item }: { item: { pos: number; name: string; teamColor
           {String(item.pos).padStart(2, "0")}
         </Text>
       </View>
-      <View style={[styles.stripe, { backgroundColor: item.teamColor }]} />
+      {logo ? (
+        <Image source={logo} style={styles.logo} resizeMode="contain" />
+      ) : (
+        <View style={[styles.stripe, { backgroundColor: item.teamColor }]} />
+      )}
       <View style={styles.nameCol}>
         <Text style={[px.h3, { color: item.teamColor || C.white }]}>{item.name.toUpperCase()}</Text>
       </View>
@@ -62,6 +72,8 @@ function ConstructorRow({ item }: { item: { pos: number; name: string; teamColor
 }
 
 export default function StandingsScreen() {
+  const { C, px, statusBarStyle, scaleValue } = useThemeTokens();
+  const styles = React.useMemo(() => createStyles(C, scaleValue), [C, scaleValue]);
   const [tab, setTab] = useState<Tab>("drivers");
   const driverQuery = useDriverStandings();
   const constructorQuery = useConstructorStandings();
@@ -77,7 +89,7 @@ export default function StandingsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle={statusBarStyle} backgroundColor={C.bg} />
 
       {/* Header */}
       <View style={styles.header}>
@@ -107,7 +119,7 @@ export default function StandingsScreen() {
           <View style={styles.leaderLeft}>
             <Text style={[px.label, { color: C.grey }]}>CHAMPIONSHIP LEADER</Text>
             <Text style={[px.h1, { color: leader.teamColor, marginTop: 4 }]}>
-              {"name" in leader ? leader.name : leader.name}
+              {leader.name}
             </Text>
           </View>
           <Text style={[px.h1, { color: C.yellow, fontSize: 20 }]}>{leader.points}</Text>
@@ -133,7 +145,7 @@ export default function StandingsScreen() {
         <FlatList
           data={driverStandings}
           keyExtractor={(d) => String(d.pos)}
-          renderItem={({ item }) => <DriverRow item={item} />}
+          renderItem={({ item }) => <DriverRow item={item} C={C} px={px} styles={styles} />}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 16 }}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
@@ -142,7 +154,7 @@ export default function StandingsScreen() {
         <FlatList
           data={constructorStandings}
           keyExtractor={(d) => String(d.pos)}
-          renderItem={({ item }) => <ConstructorRow item={item} />}
+          renderItem={({ item }) => <ConstructorRow item={item} C={C} px={px} styles={styles} />}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 16 }}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
@@ -152,32 +164,35 @@ export default function StandingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(C: any, scale: number) {
+  const s = Math.max(0.9, Math.min(1.2, scale));
+  const m = (n: number) => Math.round(n * s);
+  return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    padding: 16, paddingBottom: 12,
+    padding: m(16), paddingBottom: m(12),
     borderBottomWidth: 2, borderBottomColor: C.accent,
   },
   tabRow: {
-    flexDirection: "row", margin: 12,
+    flexDirection: "row", margin: m(12),
     borderWidth: 2, borderColor: C.borderBright,
   },
-  tabBtn: { flex: 1, paddingVertical: 10, alignItems: "center" },
+  tabBtn: { flex: 1, paddingVertical: m(10), alignItems: "center", minHeight: m(42) },
   tabBtnActive: { backgroundColor: C.accent },
 
   leaderBanner: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    marginHorizontal: 12, marginBottom: 8,
+    marginHorizontal: m(12), marginBottom: m(8),
     borderWidth: 2, backgroundColor: C.bgCard,
-    padding: 12,
+    padding: m(12),
   },
   leaderStripe: { width: 4, height: "100%", position: "absolute", left: 0, top: 0 },
-  leaderLeft: { flex: 1, paddingLeft: 10 },
+  leaderLeft: { flex: 1, paddingLeft: m(10) },
 
   colHeader: {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 12, paddingVertical: 6,
+    paddingHorizontal: m(12), paddingVertical: m(6),
     borderBottomWidth: 1, borderBottomColor: C.borderBright,
     backgroundColor: C.bgPanel,
   },
@@ -185,15 +200,18 @@ const styles = StyleSheet.create({
 
   row: {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 12, paddingVertical: 12,
+    paddingHorizontal: m(12), paddingVertical: m(12),
+    minHeight: m(56),
     backgroundColor: C.bg,
   },
   posBox: {
-    width: 32, height: 32, borderWidth: 1,
+    width: m(32), height: m(32), borderWidth: 1,
     alignItems: "center", justifyContent: "center",
-    marginRight: 6,
+    marginRight: m(6),
   },
-  stripe: { width: 3, height: 36, marginRight: 10 },
+  stripe: { width: 3, height: m(36), marginRight: m(10) },
+  logo: { width: m(28), height: m(28), marginRight: m(10) },
   nameCol: { flex: 1 },
-  ptsBox: { width: 56, alignItems: "flex-end" },
-});
+  ptsBox: { width: m(56), alignItems: "flex-end" },
+  });
+}
