@@ -97,9 +97,9 @@ function DriverRow({ driver, mode, C, px, styles }: { driver: DriverItem; mode: 
 
       {/* S1 S2 S3 */}
       <View style={styles.sectorsCol}>
-        <SectorCell value={driver.sectorTimes[0]} styles={styles} />
-        <SectorCell value={driver.sectorTimes[1]} styles={styles} />
-        <SectorCell value={driver.sectorTimes[2]} styles={styles} />
+        <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[0]} styles={styles} /></View>
+        <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[1]} styles={styles} /></View>
+        <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[2]} styles={styles} /></View>
       </View>
 
       {/* BEST LAP */}
@@ -202,16 +202,16 @@ export default function LiveScreen() {
 function ScrollableHeaders({ mode, onToggle, C, styles }: { mode: ViewMode; onToggle: () => void; C: any; styles: any }) {
   return (
     <View style={styles.colHeader}>
-      <Text style={[styles.colText, { width: 26 }]}>POS</Text>
-      <Text style={[styles.colText, { width: 60 }]}>DRIVER</Text>
-      <TouchableOpacity style={{ width: 52 }} onPress={onToggle}>
+      <Text style={[styles.colText, { width: 34, paddingLeft: 4 }]}>POS</Text>
+      <Text style={[styles.colText, { flex: 1, minWidth: 70 }]}>DRIVER</Text>
+      <TouchableOpacity style={{ width: 62 }} onPress={onToggle}>
         <Text style={[styles.colText, { color: C.accent }]}>{mode === "gap" ? "[GAP]" : "[INT]"}</Text>
       </TouchableOpacity>
-      <Text style={[styles.colText, { width: 34 }]}>TYR</Text>
-      <Text style={[styles.colText, { width: 22 }]}>PIT</Text>
-      <Text style={[styles.colText, { width: 70 }]}>S1·S2·S3</Text>
-      <Text style={[styles.colText, { width: 60 }]}>BEST</Text>
-      <Text style={[styles.colText, { width: 60 }]}>LAST</Text>
+      <Text style={[styles.colText, { width: 38, marginRight: 4, textAlign: 'center' }]}>TYR</Text>
+      <Text style={[styles.colText, { width: 30, textAlign: 'center' }]}>PIT</Text>
+      <Text style={[styles.colText, { width: 80, paddingLeft: 2 }]}>S1·S2·S3</Text>
+      <Text style={[styles.colText, { width: 65, textAlign: 'right' }]}>BEST</Text>
+      <Text style={[styles.colText, { width: 65, textAlign: 'right' }]}>LAST</Text>
     </View>
   );
 }
@@ -246,11 +246,11 @@ function createStyles(C: any, scale: number) {
 
   colHeader: {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: m(9), paddingVertical: m(5),
+    paddingHorizontal: m(9), paddingVertical: m(8),
     borderBottomWidth: 1, borderBottomColor: C.borderBright,
     backgroundColor: C.bgPanel,
   },
-  colText: { fontFamily: "PressStart2P", fontSize: 5, color: C.grey },
+  colText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey },
 
   rowSep: { height: 1, backgroundColor: C.border },
 
@@ -262,20 +262,20 @@ function createStyles(C: any, scale: number) {
   teamStripe: { width: 3, height: m(38), marginRight: m(6) },
   livery: { width: m(32), height: m(20), marginRight: m(6) },
 
-  posWrap:   { width: 26, alignItems: "flex-start" },
-  driverCol: { width: 60 },
-  gapCol:    { width: 52 },
+  posWrap:   { width: 34, alignItems: "flex-start", paddingLeft: 4 },
+  driverCol: { flex: 1, minWidth: 70 },
+  gapCol:    { width: 62 },
 
-  tireBadge: { width: 34, borderWidth: 1, alignItems: "center", paddingVertical: m(2), marginRight: 0 },
-  tireCompound: { fontFamily: "PressStart2P", fontSize: 8, fontWeight: "900" },
-  tireAge:      { fontFamily: "PressStart2P", fontSize: 5, color: "#888" },
+  tireBadge: { width: 38, borderWidth: 1, alignItems: "center", paddingVertical: m(2), marginRight: m(4) },
+  tireCompound: { fontFamily: "PressStart2P", fontSize: 9, fontWeight: "900" },
+  tireAge:      { fontFamily: "PressStart2P", fontSize: 6, color: "#888", marginTop: 1 },
 
-  pitsCol: { width: 22, alignItems: "center" },
+  pitsCol: { width: 30, alignItems: "center" },
 
-  sectorsCol: { width: 70, gap: 1 },
-  sectorText: { fontFamily: "PressStart2P", fontSize: 5, color: C.grey },
+  sectorsCol: { width: 80, gap: 1 },
+  sectorText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey },
 
-  lapCol: { width: 60 },
-  lapText: { fontFamily: "PressStart2P", fontSize: 5, color: C.white },
+  lapCol: { width: 65, alignItems: "flex-end" },
+  lapText: { fontFamily: "PressStart2P", fontSize: 6, color: C.white },
   });
 }
