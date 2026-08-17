@@ -208,10 +208,10 @@ export default function ScheduleScreen() {
     return result.sort((a, b) => parseDate(a.earliestDate) - parseDate(b.earliestDate));
   }, [allSessionsQuery.data, now]);
 
+  const liveMeetingKey = weekends.find((w) => w.status === "live")?.meetingKey;
   React.useEffect(() => {
-    const live = weekends.find((w) => w.status === "live");
-    if (live) setExpanded(live.meetingKey);
-  }, [weekends.length]);
+    if (liveMeetingKey != null) setExpanded(liveMeetingKey);
+  }, [liveMeetingKey]);
 
   const done = weekends.filter((w) => w.status === "done").length;
   const total = weekends.length;

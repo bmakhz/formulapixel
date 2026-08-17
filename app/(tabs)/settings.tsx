@@ -1,11 +1,11 @@
 import React from "react";
 import {
   View, Text, ScrollView, StyleSheet,
-  TouchableOpacity, StatusBar,
+  TouchableOpacity, StatusBar, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useThemeTokens } from "../../components/theme";
-import { useSettingsStore } from "../../store/useSettingsStore";
+import { useSettingsStore, DEFAULT_REALTIME_URL } from "../../store/useSettingsStore";
 
 // ── Pixel switch ─────────────────────────────────────────────────
 function PixelSwitch({
@@ -102,10 +102,12 @@ export default function SettingsScreen() {
   const scale = useSettingsStore((s) => s.scale);
   const speedUnit = useSettingsStore((s) => s.speedUnit);
   const temperatureUnit = useSettingsStore((s) => s.temperatureUnit);
+  const realtimeUrl = useSettingsStore((s) => s.realtimeUrl);
   const setMode = useSettingsStore((s) => s.setMode);
   const setScale = useSettingsStore((s) => s.setScale);
   const setSpeedUnit = useSettingsStore((s) => s.setSpeedUnit);
   const setTemperatureUnit = useSettingsStore((s) => s.setTemperatureUnit);
+  const setRealtimeUrl = useSettingsStore((s) => s.setRealtimeUrl);
 
   const nextScale = () => {
     if (scale === "small") return setScale("normal");
@@ -165,6 +167,34 @@ export default function SettingsScreen() {
           />
         </View>
 
+        {/* ── Data Source ── */}
+        <SectionHeader title="DATA SOURCE" C={C} px={px} styles={styles} />
+        <View style={styles.card}>
+          <View style={styles.inputRow}>
+            <Text style={[px.h3, { color: C.white }]}>LIVE BACKEND URL</Text>
+            <Text style={[px.label, { color: C.greyDark, marginTop: 3, fontSize: 5 }]}>
+              SIGNALR RELAY FOR LIVE SESSION TIMING
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={realtimeUrl}
+              onChangeText={setRealtimeUrl}
+              placeholder={DEFAULT_REALTIME_URL}
+              placeholderTextColor={C.greyDark}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            {realtimeUrl !== DEFAULT_REALTIME_URL && (
+              <TouchableOpacity onPress={() => setRealtimeUrl(DEFAULT_REALTIME_URL)} activeOpacity={0.8}>
+                <Text style={[px.label, { color: C.accent, marginTop: 8, fontSize: 6 }]}>
+                  [ RESET TO DEFAULT ]
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
         {/* Disclaimer */}
         <View style={{ marginTop: 24, padding: 8, alignItems: "center" }}>
           <Text style={[px.label, { color: C.greyDark, fontSize: 5, lineHeight: 10, textAlign: "center" }]}>
@@ -206,6 +236,16 @@ function createStyles(C: any) {
     padding: 14, gap: 12,
   },
   settingLeft: { flex: 1 },
+
+  inputRow: { padding: 14 },
+  input: {
+    marginTop: 10,
+    borderWidth: 2, borderColor: C.borderBright,
+    backgroundColor: C.bgPanel,
+    color: C.white,
+    fontFamily: "PressStart2P", fontSize: 7,
+    paddingHorizontal: 8, paddingVertical: 10,
+  },
 
   selector: {
     minWidth: 78,

@@ -191,7 +191,7 @@ export function formatSectorTime(value?: number | null): string {
 export function getRaceStatus(session: RaceSession, now: number): 'live' | 'done' | 'upcoming' {
   const start = parseDate(session.date_start);
   const end = parseDate(session.date_end);
-  if (start <= now && now <= end) return 'live';
+  if (start > 0 && start <= now && (end <= 0 || now <= end)) return 'live';
   if (end > 0 && end < now) return 'done';
   return 'upcoming';
 }
