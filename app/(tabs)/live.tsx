@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useActiveRaceSession, useLiveRaceData, formatLapTime, getRaceStatus } from "../../hooks/useOpenF1";
+import { useF1LiveTiming } from "../../hooks/useF1LiveTiming";
 import { useThemeTokens } from "../../components/theme";
 import { useSettingsStore } from "../../store/useSettingsStore";
 import { formatSpeed, formatTemperature } from "../../utils/unitConversion";
@@ -16,12 +17,14 @@ type ViewMode = "gap" | "interval";
 function BlinkDot({ color }: { color: string }) {
   const anim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(anim, { toValue: 0, duration: 500, useNativeDriver: true }),
         Animated.timing(anim, { toValue: 1, duration: 500, useNativeDriver: true }),
       ])
-    ).start();
+    );
+    loop.start();
+    return () => loop.stop();
   }, []);
   return <Animated.View style={{ width: 6, height: 6, backgroundColor: color, opacity: anim }} />;
 }
@@ -122,13 +125,22 @@ export default function LiveScreen() {
   const [mode, setMode] = useState<ViewMode>("gap");
   const speedUnit = useSettingsStore((s) => s.speedUnit);
   const temperatureUnit = useSettingsStore((s) => s.temperatureUnit);
+  const realtimeUrl = useSettingsStore((s) => s.realtimeUrl);
   const raceSessions = useActiveRaceSession();
   const activeSession = raceSessions.liveSession ?? raceSessions.activeRace;
-  const liveData = useLiveRaceData(activeSession?.session_key ?? null);
 
-  const raceName = activeSession?.country_name ?? activeSession?.meeting_name ?? "GRAND PRIX";
   const sessionStatus = activeSession ? getRaceStatus(activeSession, Date.now()) : "upcoming";
   const isLive = sessionStatus === "live";
+
+  const openF1Data = useLiveRaceData(activeSession?.session_key ?? null);
+  const sseData = useF1LiveTiming(realtimeUrl || null, isLive);
+  // During a live session the SignalR relay is the real source; OpenF1's
+  // live window is paywalled. Fall back to OpenF1 until the stream connects.
+  const useSse = isLive && sseData.connected && sseData.rows.length > 0;
+  const liveData = useSse ? sseData : openF1Data;
+  const totalLaps = useSse ? sseData.totalLaps : null;
+
+  const raceName = activeSession?.country_name ?? activeSession?.meeting_name ?? "GRAND PRIX";
   const isRaceOver = activeSession?.session_type === "Race" && sessionStatus === "done";
   const sessionLabel = (activeSession?.session_type ?? activeSession?.session_name ?? "SESSION").toUpperCase();
   const airTemp = liveData.latestWeather?.air_temperature;
@@ -156,7 +168,7 @@ export default function LiveScreen() {
         <View style={styles.lapBox}>
           <Text style={[px.label, { color: C.grey }]}>LAP</Text>
           <Text style={[px.h1, { color: C.yellow }]}>{String(liveData.currentLap ?? "--").padStart(2, "0")}</Text>
-          <Text style={[px.label, { color: C.grey }]}>/--</Text>
+          <Text style={[px.label, { color: C.grey }]}>/{totalLaps != null ? String(totalLaps).padStart(2, "0") : "--"}</Text>
         </View>
       </View>
 

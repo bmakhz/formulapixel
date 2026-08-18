@@ -1,0 +1,39 @@
+name: Keep realtime backend warm
+
+# Pings the Render free-tier realtime service during F1 session windows so it
+# doesn't cold-start mid-session. Outside session windows the job exits fast
+# and the service is left to sleep (staying within Render's free hours).
+
+on:
+  schedule:
+    # Every 5 minutes. Cron is best-effort on GitHub; 5-min cadence against
+    # Render's ~15-min idle timeout leaves comfortable slack.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      force_ping:
+        description: "Ping once regardless of the F1 calendar (for testing)"
+        type: boolean
+        default: false
+
+# Don't stack runs; if one is already going, skip the newcomer.
+concurrency:
+  group: keep-warm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Keep warm
+        env:
+          # Override in repo Settings > Secrets and variables > Actions > Variables
+          # if the backend URL ever changes; falls back to the default below.
+          REALTIME_URL: ${{ vars.REALTIME_URL || 'https://formula-pixel-realtime-latest.onrender.com' }}
+          FORCE_PING: ${{ github.event.inputs.force_ping }}
+        run: node .github/scripts/keep-warm.mjs
