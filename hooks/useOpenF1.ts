@@ -98,6 +98,10 @@ export type LeaderboardRow = {
   dnf: boolean;
   dns: boolean;
   dsq: boolean;
+  // Qualifying only (from the live SSE feed): whether the driver is already
+  // eliminated (knockedOut) or currently in the drop zone (cutoff).
+  knockedOut?: boolean;
+  cutoff?: boolean;
 };
 
 export type DriverStanding = {

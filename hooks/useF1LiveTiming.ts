@@ -27,6 +27,20 @@ export type RaceControlItem = {
   racingNumber: string | null;
 };
 
+export type SessionMeta = {
+  name: string;         // "Qualifying" | "Race" | "Practice 1" | "Sprint" ...
+  meetingName: string;  // "Dutch Grand Prix"
+  country: string;
+  location: string;
+  circuit: string;
+  status: string;       // raw SessionStatus.Status ("Started" | "Finished" | ...)
+  live: boolean;        // session currently running
+  finished: boolean;
+  part: number | null;  // qualifying segment 1/2/3 (else null)
+  noEntries: number[] | null; // cars per part, e.g. [22,16,10]
+  clock: string | null; // ExtrapolatedClock.Remaining ("HH:MM:SS")
+};
+
 // ── Recursive merge-patch (mirrors the server's merge) ─────────
 // Objects merge key-by-key; F1 represents arrays as objects keyed by
 // numeric-string index, so a numeric key patches an array element.
@@ -139,6 +153,8 @@ function buildRows(state: F1State): LeaderboardRow[] {
       dnf: retired,
       dns: false,
       dsq: false,
+      knockedOut: t.KnockedOut === true,
+      cutoff: t.Cutoff === true,
     };
   });
 
@@ -269,6 +285,32 @@ export function useF1LiveTiming(baseUrl: string | null, enabled: boolean) {
       .sort((a, b) => (b.utc > a.utc ? 1 : b.utc < a.utc ? -1 : 0));
   }, [tick]);
 
+  // Session identity straight from the live feed — authoritative for "what's
+  // live right now", so the UI doesn't depend on OpenF1's (paywalled/rate-
+  // limited) calendar during a session.
+  const session = useMemo<SessionMeta | null>(() => {
+    const info = stateRef.current?.SessionInfo;
+    const rawStatus = stateRef.current?.SessionStatus?.Status;
+    const td = stateRef.current?.TimingData;
+    if (!info && !rawStatus) return null;
+    const status = typeof rawStatus === "string" ? rawStatus : "";
+    return {
+      name: info?.Name ?? "SESSION",
+      meetingName: info?.Meeting?.Name ?? "",
+      country: info?.Meeting?.Country?.Name ?? "",
+      location: info?.Meeting?.Location ?? "",
+      circuit: info?.Meeting?.Circuit?.ShortName ?? "",
+      status,
+      live: status === "Started" || status === "Aborted", // Aborted = red flag
+      finished: status === "Finished" || status === "Finalised" || status === "Ends",
+      part: typeof td?.SessionPart === "number" ? td.SessionPart : null,
+      noEntries: Array.isArray(td?.NoEntries) ? td.NoEntries : null,
+      clock: typeof stateRef.current?.ExtrapolatedClock?.Remaining === "string"
+        ? stateRef.current.ExtrapolatedClock.Remaining
+        : null,
+    };
+  }, [tick]);
+
   return {
     rows,
     top3: rows.slice(0, 3),
@@ -277,6 +319,7 @@ export function useF1LiveTiming(baseUrl: string | null, enabled: boolean) {
     latestWeather,
     trackStatus,
     raceControl,
+    session,
     connected,
     isLoading: enabled && !connected && rows.length === 0,
     hasError,

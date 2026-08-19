@@ -59,11 +59,15 @@ type DriverItem = ReturnType<typeof useLiveRaceData>["rows"][number];
 
 function DriverRow({ driver, mode, C, px, styles }: { driver: DriverItem; mode: ViewMode; C: any; px: any; styles: any }) {
   const gapText = mode === "gap" ? driver.gap : driver.gapToNext;
-  const rowBg = driver.status !== "RUN" ? C.bgPanel : C.bg;
+  const knockedOut = driver.knockedOut === true;
+  const cutoff = driver.cutoff === true && !knockedOut; // in the drop zone now
+  const nonRunning = driver.status !== "RUN";
+  const rowBg = cutoff ? C.accentDim : nonRunning || knockedOut ? C.bgPanel : C.bg;
+  const rowOpacity = knockedOut ? 0.4 : nonRunning ? 0.65 : 1;
   const livery = teamLiverySource(driver.team);
 
   return (
-    <View style={[styles.driverRow, { backgroundColor: rowBg, opacity: driver.status !== "RUN" ? 0.65 : 1 }]}> 
+    <View style={[styles.driverRow, { backgroundColor: rowBg, opacity: rowOpacity }]}>
       {/* Team stripe */}
       <View style={[styles.teamStripe, { backgroundColor: driver.teamColor }]} />
 
@@ -87,8 +91,8 @@ function DriverRow({ driver, mode, C, px, styles }: { driver: DriverItem; mode: 
 
       {/* GAP */}
       <View style={styles.gapCol}>
-        <Text style={[px.label, { color: driver.status !== "RUN" ? C.accent : gapText === "LEADER" ? C.accent : C.white, fontSize: 6 }]} numberOfLines={1}>
-          {driver.status !== "RUN" ? driver.status : gapText === "LEADER" ? "LDR" : gapText}
+        <Text style={[px.label, { color: knockedOut || nonRunning || gapText === "LEADER" ? C.accent : C.white, fontSize: 6 }]} numberOfLines={1}>
+          {knockedOut ? "OUT" : nonRunning ? driver.status : gapText === "LEADER" ? "LDR" : gapText}
         </Text>
       </View>
 
@@ -141,6 +145,15 @@ function rcTime(utc: string): string {
   return m ? m[1] : "--:--";
 }
 
+// "00:17:56" -> "17:56" (drop the hours when zero)
+function formatSessionClock(v?: string | null): string | null {
+  if (!v) return null;
+  const m = v.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+  if (!m) return v;
+  const [, h, mm, ss] = m;
+  return Number(h) > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 function RaceControlPanel({ messages, C, px, styles }: { messages: RaceControlItem[]; C: any; px: any; styles: any }) {
   const [open, setOpen] = useState(false);
   if (!messages.length) return null;
@@ -191,29 +204,52 @@ export default function LiveScreen() {
   const raceSessions = useActiveRaceSession();
   const activeSession = raceSessions.liveSession ?? raceSessions.activeRace;
 
-  const sessionStatus = activeSession ? getRaceStatus(activeSession, Date.now()) : "upcoming";
-  const isLive = sessionStatus === "live";
+  // The SSE relay is the source of truth for live sessions: it self-describes
+  // the session and carries all timing, so we don't depend on OpenF1's
+  // (paywalled during the live window, and rate-limited) calendar here.
+  // Connect whenever the Live tab is open and a backend URL is configured.
+  const sseData = useF1LiveTiming(realtimeUrl || null, !!realtimeUrl);
+  const useSse = sseData.connected && sseData.rows.length > 0;
 
-  // ⚠️ TEMP DEV PREVIEW — set back to `false` (or delete) before committing.
-  // Forces the SSE path on with no live session so the last race's frozen
-  // state (incl. race control) streams in for local testing.
-  const FORCE_LIVE_PREVIEW = true;
+  // Only hit OpenF1's live endpoints as a fallback when SSE isn't providing
+  // data — during a live session those endpoints are paywalled and would just
+  // burn our rate limit (starving the schedule/standings calls).
+  const openF1Data = useLiveRaceData(useSse ? null : activeSession?.session_key ?? null);
 
-  const openF1Data = useLiveRaceData(activeSession?.session_key ?? null);
-  const sseData = useF1LiveTiming(realtimeUrl || null, isLive || FORCE_LIVE_PREVIEW);
-  // During a live session the SignalR relay is the real source; OpenF1's
-  // live window is paywalled. Fall back to OpenF1 until the stream connects.
-  const useSse = (isLive || FORCE_LIVE_PREVIEW) && sseData.connected && sseData.rows.length > 0;
   const liveData = useSse ? sseData : openF1Data;
+  const sess = useSse ? sseData.session : null;
+
+  const openF1Status = activeSession ? getRaceStatus(activeSession, Date.now()) : "upcoming";
+  const isLive = useSse ? !!sess?.live : openF1Status === "live";
+
+  const sessionName = sess?.name ?? activeSession?.session_type ?? activeSession?.session_name ?? "SESSION";
+  const isQuali = /quali|shootout/i.test(sessionName);
+  const segPrefix = /sprint/i.test(sessionName) ? "SQ" : "Q";
+  const segment = useSse && isQuali && sess?.part ? `${segPrefix}${sess.part}` : null;
+  const clock = formatSessionClock(sess?.clock);
+  // Cutoff position: cars advancing to the next part sit above this line.
+  const cutoffAfter = useSse && isQuali && sess?.part && sess.part < 3 && sess.noEntries
+    ? sess.noEntries[sess.part] ?? null
+    : null;
+
   const totalLaps = useSse ? sseData.totalLaps : null;
   const raceControl = useSse ? sseData.raceControl : [];
 
-  const raceName = activeSession?.country_name ?? activeSession?.meeting_name ?? "GRAND PRIX";
-  const isRaceOver = activeSession?.session_type === "Race" && sessionStatus === "done";
-  const sessionLabel = (activeSession?.session_type ?? activeSession?.session_name ?? "SESSION").toUpperCase();
+  const raceName = useSse
+    ? (sess?.country || sess?.meetingName || "GRAND PRIX")
+    : (activeSession?.country_name ?? activeSession?.meeting_name ?? "GRAND PRIX");
+  const isRaceOver = useSse
+    ? (/race/i.test(sessionName) && !!sess?.finished)
+    : (activeSession?.session_type === "Race" && openF1Status === "done");
+  const sessionLabel = sessionName.toUpperCase();
   const airTemp = liveData.latestWeather?.air_temperature;
   const trkTemp = liveData.latestWeather?.track_temperature;
-  const trackOutline = trackOutlineSource(themeMode, activeSession?.country_name, activeSession?.location, activeSession?.circuit_short_name);
+  const trackOutline = trackOutlineSource(
+    themeMode,
+    useSse ? sess?.country : activeSession?.country_name,
+    useSse ? sess?.location : activeSession?.location,
+    useSse ? sess?.circuit : activeSession?.circuit_short_name,
+  );
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -226,6 +262,8 @@ export default function LiveScreen() {
             {isLive ? <BlinkDot color={C.accent} /> : <View style={{ width: 6, height: 6, backgroundColor: C.greyDark }} />}
             <Text style={[px.label, { color: isLive ? C.accent : C.grey }]}>{isLive ? "LIVE" : isRaceOver ? "FINISHED" : "LATEST"}</Text>
             <Text style={[px.label, { color: C.cyan }]}>{sessionLabel}</Text>
+            {segment && <Text style={[px.label, { color: C.yellow }]}>{segment}</Text>}
+            {isLive && clock && <Text style={[px.label, { color: C.grey }]}>{clock}</Text>}
             {isRaceOver && <Text style={[px.label, { color: C.yellow }]}>🏁</Text>}
           </View>
           <View style={styles.titleRow}>
@@ -233,11 +271,19 @@ export default function LiveScreen() {
             <Text style={[px.h2, { color: C.white, flex: 1 }]}>{raceName.toUpperCase().slice(0, 20)}</Text>
           </View>
         </View>
-        <View style={styles.lapBox}>
-          <Text style={[px.label, { color: C.grey }]}>LAP</Text>
-          <Text style={[px.h1, { color: C.yellow }]}>{String(liveData.currentLap ?? "--").padStart(2, "0")}</Text>
-          <Text style={[px.label, { color: C.grey }]}>/{totalLaps != null ? String(totalLaps).padStart(2, "0") : "--"}</Text>
-        </View>
+        {segment ? (
+          <View style={styles.lapBox}>
+            <Text style={[px.label, { color: C.grey }]}>PART</Text>
+            <Text style={[px.h1, { color: C.yellow }]}>{segment}</Text>
+            <Text style={[px.label, { color: C.grey }]}>{clock ?? "--:--"}</Text>
+          </View>
+        ) : (
+          <View style={styles.lapBox}>
+            <Text style={[px.label, { color: C.grey }]}>LAP</Text>
+            <Text style={[px.h1, { color: C.yellow }]}>{String(liveData.currentLap ?? "--").padStart(2, "0")}</Text>
+            <Text style={[px.label, { color: C.grey }]}>/{totalLaps != null ? String(totalLaps).padStart(2, "0") : "--"}</Text>
+          </View>
+        )}
       </View>
 
       {/* ── Weather ── */}
@@ -271,7 +317,16 @@ export default function LiveScreen() {
         <FlatList
           data={liveData.rows}
           keyExtractor={(d) => String(d.driverNumber)}
-          renderItem={({ item }) => <DriverRow driver={item} mode={mode} C={C} px={px} styles={styles} />}
+          renderItem={({ item, index }) => (
+            <>
+              <DriverRow driver={item} mode={mode} C={C} px={px} styles={styles} />
+              {cutoffAfter != null && index === cutoffAfter - 1 && (
+                <View style={styles.elimLine}>
+                  <Text style={[px.label, { color: C.accent, fontSize: 6 }]}>▼ ELIMINATION ▼</Text>
+                </View>
+              )}
+            </>
+          )}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 12 }}
           ItemSeparatorComponent={() => <View style={styles.rowSep} />}
@@ -363,6 +418,13 @@ function createStyles(C: any, scale: number) {
   colTyr: { width: 38, marginRight: m(4), textAlign: "center" },
 
   rowSep: { height: 1, backgroundColor: C.border },
+
+  elimLine: {
+    alignItems: "center", justifyContent: "center",
+    paddingVertical: m(3),
+    backgroundColor: C.accentDim,
+    borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.accent,
+  },
 
   driverRow: {
     flexDirection: "row", alignItems: "center",
