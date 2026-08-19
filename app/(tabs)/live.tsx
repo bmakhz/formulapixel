@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   View, Text, FlatList, StyleSheet,
-  TouchableOpacity, Animated, StatusBar, Image,
+  TouchableOpacity, Animated, StatusBar, Image, ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useActiveRaceSession, useLiveRaceData, formatLapTime, getRaceStatus } from "../../hooks/useOpenF1";
-import { useF1LiveTiming } from "../../hooks/useF1LiveTiming";
+import { useF1LiveTiming, type RaceControlItem } from "../../hooks/useF1LiveTiming";
 import { useThemeTokens } from "../../components/theme";
 import { useSettingsStore } from "../../store/useSettingsStore";
 import { formatSpeed, formatTemperature } from "../../utils/unitConversion";
@@ -118,6 +118,65 @@ function DriverRow({ driver, mode, C, px, styles }: { driver: DriverItem; mode: 
   );
 }
 
+// ── Race control ────────────────────────────────────────────────
+function rcColor(flag: string, category: string, C: any): string {
+  const f = flag.toUpperCase();
+  if (f.includes("RED")) return C.accent;
+  if (f.includes("CHEQUERED")) return C.white;
+  if (f.includes("BLACK AND WHITE")) return C.yellow;
+  if (f.includes("YELLOW")) return C.yellow;
+  if (f.includes("GREEN")) return C.green;
+  if (f.includes("BLUE")) return C.cyan;
+  const c = category.toUpperCase();
+  if (c === "SAFETYCAR") return C.yellow;
+  if (c === "DRS") return C.cyan;
+  return C.greyDark;
+}
+
+function rcTime(utc: string): string {
+  const m = utc.match(/T(\d{2}:\d{2})/);
+  return m ? m[1] : "--:--";
+}
+
+function RaceControlPanel({ messages, C, px, styles }: { messages: RaceControlItem[]; C: any; px: any; styles: any }) {
+  const [open, setOpen] = useState(false);
+  if (!messages.length) return null;
+  const latest = messages[0];
+  const shown = open ? messages.slice(0, 30) : [];
+
+  return (
+    <View style={styles.rcWrap}>
+      <TouchableOpacity activeOpacity={0.8} onPress={() => setOpen((o) => !o)} style={styles.rcHeader}>
+        <View style={[styles.rcStripe, { backgroundColor: rcColor(latest.flag, latest.category, C) }]} />
+        <Text style={[px.label, { color: C.accent }]}>RC</Text>
+        {!open && (
+          <Text style={[px.label, { color: C.white, flex: 1 }]} numberOfLines={1}>
+            {latest.message}
+          </Text>
+        )}
+        {open && <Text style={[px.label, { color: C.grey, flex: 1 }]}>RACE CONTROL</Text>}
+        <Text style={[px.label, { color: C.grey }]}>{messages.length}</Text>
+        <Text style={[px.label, { color: C.accent }]}>{open ? "[-]" : "[+]"}</Text>
+      </TouchableOpacity>
+
+      {open && (
+        <ScrollView style={styles.rcList} showsVerticalScrollIndicator={false}>
+          {shown.map((m, i) => (
+            <View key={`${m.utc}-${i}`} style={styles.rcRow}>
+              <View style={[styles.rcRowStripe, { backgroundColor: rcColor(m.flag, m.category, C) }]} />
+              <Text style={[px.label, { color: C.greyDark, width: 34 }]}>{rcTime(m.utc)}</Text>
+              {m.racingNumber && (
+                <Text style={[px.label, { color: C.cyan, width: 18 }]}>#{m.racingNumber}</Text>
+              )}
+              <Text style={[px.label, { color: C.white, flex: 1, lineHeight: 10 }]}>{m.message}</Text>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
 // ── Main screen ─────────────────────────────────────────────────
 export default function LiveScreen() {
   const { C, px, statusBarStyle, mode: themeMode, scaleValue } = useThemeTokens();
@@ -132,13 +191,19 @@ export default function LiveScreen() {
   const sessionStatus = activeSession ? getRaceStatus(activeSession, Date.now()) : "upcoming";
   const isLive = sessionStatus === "live";
 
+  // ⚠️ TEMP DEV PREVIEW — set back to `false` (or delete) before committing.
+  // Forces the SSE path on with no live session so the last race's frozen
+  // state (incl. race control) streams in for local testing.
+  const FORCE_LIVE_PREVIEW = true;
+
   const openF1Data = useLiveRaceData(activeSession?.session_key ?? null);
-  const sseData = useF1LiveTiming(realtimeUrl || null, isLive);
+  const sseData = useF1LiveTiming(realtimeUrl || null, isLive || FORCE_LIVE_PREVIEW);
   // During a live session the SignalR relay is the real source; OpenF1's
   // live window is paywalled. Fall back to OpenF1 until the stream connects.
-  const useSse = isLive && sseData.connected && sseData.rows.length > 0;
+  const useSse = (isLive || FORCE_LIVE_PREVIEW) && sseData.connected && sseData.rows.length > 0;
   const liveData = useSse ? sseData : openF1Data;
   const totalLaps = useSse ? sseData.totalLaps : null;
+  const raceControl = useSse ? sseData.raceControl : [];
 
   const raceName = activeSession?.country_name ?? activeSession?.meeting_name ?? "GRAND PRIX";
   const isRaceOver = activeSession?.session_type === "Race" && sessionStatus === "done";
@@ -187,6 +252,9 @@ export default function LiveScreen() {
           </View>
         ))}
       </View>
+
+      {/* ── Race control ── */}
+      <RaceControlPanel messages={raceControl} C={C} px={px} styles={styles} />
 
       {/* ── Column headers ── */}
       <ScrollableHeaders mode={mode} onToggle={() => setMode(m => m === "gap" ? "interval" : "gap")} C={C} styles={styles} />
@@ -255,6 +323,23 @@ function createStyles(C: any, scale: number) {
     borderBottomWidth: 1, borderBottomColor: C.border,
   },
   weatherItem: { alignItems: "center", gap: m(2) },
+
+  rcWrap: {
+    backgroundColor: C.bgPanel,
+    borderBottomWidth: 1, borderBottomColor: C.border,
+  },
+  rcHeader: {
+    flexDirection: "row", alignItems: "center", gap: m(6),
+    paddingHorizontal: m(9), paddingVertical: m(6),
+  },
+  rcStripe: { width: 3, height: m(12) },
+  rcList: { maxHeight: m(150) },
+  rcRow: {
+    flexDirection: "row", alignItems: "center", gap: m(6),
+    paddingHorizontal: m(9), paddingVertical: m(4),
+    borderTopWidth: 1, borderTopColor: C.border,
+  },
+  rcRowStripe: { width: 3, height: m(16) },
 
   colHeader: {
     flexDirection: "row", alignItems: "center",

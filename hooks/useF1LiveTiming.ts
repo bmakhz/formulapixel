@@ -18,6 +18,15 @@ export type LiveWeather = {
   rainfall?: boolean;
 };
 
+export type RaceControlItem = {
+  utc: string;
+  category: string;
+  flag: string;
+  message: string;
+  lap: number | null;
+  racingNumber: string | null;
+};
+
 // ── Recursive merge-patch (mirrors the server's merge) ─────────
 // Objects merge key-by-key; F1 represents arrays as objects keyed by
 // numeric-string index, so a numeric key patches an array element.
@@ -242,6 +251,24 @@ export function useF1LiveTiming(baseUrl: string | null, enabled: boolean) {
     return s ? { status: s.Status, message: s.Message } : null;
   }, [tick]);
 
+  // Race control feed, newest first. Messages arrive as an array (initial)
+  // that later updates append to by numeric index, so normalize both.
+  const raceControl = useMemo<RaceControlItem[]>(() => {
+    const raw = stateRef.current?.RaceControlMessages?.Messages;
+    const list: any[] = Array.isArray(raw) ? raw : Object.values(raw ?? {});
+    return list
+      .map((m) => ({
+        utc: typeof m?.Utc === "string" ? m.Utc : "",
+        category: typeof m?.Category === "string" ? m.Category : "",
+        flag: typeof m?.Flag === "string" ? m.Flag : "",
+        message: typeof m?.Message === "string" ? m.Message : "",
+        lap: toNumber(m?.Lap),
+        racingNumber: m?.RacingNumber != null ? String(m.RacingNumber) : null,
+      }))
+      .filter((m) => m.message)
+      .sort((a, b) => (b.utc > a.utc ? 1 : b.utc < a.utc ? -1 : 0));
+  }, [tick]);
+
   return {
     rows,
     top3: rows.slice(0, 3),
@@ -249,6 +276,7 @@ export function useF1LiveTiming(baseUrl: string | null, enabled: boolean) {
     totalLaps,
     latestWeather,
     trackStatus,
+    raceControl,
     connected,
     isLoading: enabled && !connected && rows.length === 0,
     hasError,
