@@ -72,7 +72,10 @@ function DriverRow({ driver, mode, C, px, styles }: { driver: DriverItem; mode: 
         <Text style={[px.h3, { color: driver.status !== "RUN" ? C.greyDark : C.white }]}>{driver.status !== "RUN" ? "--" : String(driver.position).padStart(2, " ")}</Text>
       </View>
 
-      {livery && <Image source={livery} style={styles.livery} resizeMode="contain" />}
+      {/* Fixed-width slot so rows align whether or not a livery resolves */}
+      <View style={styles.liveryWrap}>
+        {livery && <Image source={livery} style={styles.livery} resizeMode="contain" />}
+      </View>
 
       {/* DRIVER */}
       <View style={styles.driverCol}>
@@ -282,12 +285,15 @@ export default function LiveScreen() {
 function ScrollableHeaders({ mode, onToggle, C, styles }: { mode: ViewMode; onToggle: () => void; C: any; styles: any }) {
   return (
     <View style={styles.colHeader}>
+      {/* Spacers mirror the row's team stripe + livery slot exactly */}
+      <View style={styles.colStripeSpacer} />
       <Text style={[styles.colText, { width: 34, paddingLeft: 4 }]}>POS</Text>
+      <View style={styles.colLiverySpacer} />
       <Text style={[styles.colText, { flex: 1, minWidth: 70 }]}>DRIVER</Text>
       <TouchableOpacity style={{ width: 62 }} onPress={onToggle}>
         <Text style={[styles.colText, { color: C.accent }]}>{mode === "gap" ? "[GAP]" : "[INT]"}</Text>
       </TouchableOpacity>
-      <Text style={[styles.colText, { width: 38, marginRight: 4, textAlign: 'center' }]}>TYR</Text>
+      <Text style={[styles.colText, styles.colTyr]}>TYR</Text>
       <Text style={[styles.colText, { width: 30, textAlign: 'center' }]}>PIT</Text>
       <Text style={[styles.colText, { width: 80, paddingLeft: 2 }]}>S1·S2·S3</Text>
       <Text style={[styles.colText, { width: 65, textAlign: 'right' }]}>BEST</Text>
@@ -343,11 +349,18 @@ function createStyles(C: any, scale: number) {
 
   colHeader: {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: m(9), paddingVertical: m(8),
+    // Match the row's box model exactly: no left pad (the stripe spacer
+    // stands in for the team stripe), and the same paddingRight as a row.
+    paddingLeft: 0, paddingRight: m(8), paddingVertical: m(8),
     borderBottomWidth: 1, borderBottomColor: C.borderBright,
     backgroundColor: C.bgPanel,
   },
   colText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey },
+  // These three mirror teamStripe / liveryWrap / tireBadge margins 1:1 so
+  // headers and data stay aligned at every scale.
+  colStripeSpacer: { width: 3, marginRight: m(6) },
+  colLiverySpacer: { width: m(30), marginRight: m(6) },
+  colTyr: { width: 38, marginRight: m(4), textAlign: "center" },
 
   rowSep: { height: 1, backgroundColor: C.border },
 
@@ -357,7 +370,8 @@ function createStyles(C: any, scale: number) {
     minHeight: m(48),
   },
   teamStripe: { width: 3, height: m(38), marginRight: m(6) },
-  livery: { width: m(32), height: m(20), marginRight: m(6) },
+  liveryWrap: { width: m(30), height: m(20), marginRight: m(6), alignItems: "center", justifyContent: "center" },
+  livery: { width: m(30), height: m(20) },
 
   posWrap:   { width: 34, alignItems: "flex-start", paddingLeft: 4 },
   driverCol: { flex: 1, minWidth: 70 },
