@@ -273,9 +273,8 @@ export default function LiveScreen() {
         </View>
         {segment ? (
           <View style={styles.lapBox}>
-            <Text style={[px.label, { color: C.grey }]}>PART</Text>
             <Text style={[px.h1, { color: C.yellow }]}>{segment}</Text>
-            <Text style={[px.label, { color: C.grey }]}>{clock ?? "--:--"}</Text>
+            <Text style={[px.label, { color: C.grey, marginTop: 2 }]}>{clock ?? "--:--"}</Text>
           </View>
         ) : (
           <View style={styles.lapBox}>
