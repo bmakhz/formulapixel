@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   getDrivers, getLaps, getPositions, getSessions, getWeather,
@@ -271,25 +272,63 @@ export function useLastRaceResults() {
   });
 }
 
-// ── All sessions for schedule ───────────────────────────────────
-export function useAllSessions() {
+// Shared sessions query — the schedule and live-detection both read the SAME
+// cache, so we only hit OpenF1 once (halving rate-limit pressure). Cached long
+// since the season calendar barely changes, with backoff retries on failure.
+const SESSIONS_STALE = 5 * 60_000;
+function useSessionsQuery() {
   const year = new Date().getFullYear();
   return useQuery({
-    queryKey: ['all-sessions', year],
+    queryKey: ['sessions', year],
     queryFn: () => getSessions({ year }),
-    refetchInterval: 120000,
-    staleTime: 60000,
+    staleTime: SESSIONS_STALE,
+    refetchInterval: SESSIONS_STALE,
+    gcTime: 24 * 60 * 60_000,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 15000),
   });
 }
 
 // ── Race sessions (for live detection) ─────────────────────────
 export function useRaceSessions() {
-  const year = new Date().getFullYear();
-  return useQuery({
-    queryKey: ['sessions', 'all-year', year],
-    queryFn: () => getSessions({ year }),
-    refetchInterval: 60000,
-  });
+  return useSessionsQuery();
+}
+
+// ── All sessions for schedule ───────────────────────────────────
+// Persists the last good schedule to disk and falls back to it if a live fetch
+// fails (rate-limit, offline, or an OpenF1 live-window hiccup) — so the
+// schedule is always available, even when opening the app during a live session.
+const SCHEDULE_CACHE_KEY = 'cache:sessions';
+export function useAllSessions() {
+  const query = useSessionsQuery();
+  const [fallback, setFallback] = useState<unknown[] | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(SCHEDULE_CACHE_KEY)
+      .then((v) => {
+        if (!v) return;
+        try {
+          const parsed = JSON.parse(v);
+          if (Array.isArray(parsed)) setFallback(parsed);
+        } catch {
+          /* ignore corrupt cache */
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (Array.isArray(query.data) && query.data.length) {
+      AsyncStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify(query.data)).catch(() => {});
+    }
+  }, [query.data]);
+
+  const hasFresh = Array.isArray(query.data) && query.data.length > 0;
+  return {
+    ...query,
+    data: hasFresh ? query.data : fallback ?? query.data,
+    isLoading: query.isLoading && !fallback,
+  };
 }
 
 export function useActiveRaceSession() {

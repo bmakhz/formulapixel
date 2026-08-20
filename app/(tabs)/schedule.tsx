@@ -54,7 +54,7 @@ type RaceWeekend = {
   location: string;
   flag: string;
   isSprint: boolean;
-  status: "live" | "done" | "upcoming";
+  status: "live" | "inprogress" | "done" | "upcoming";
   sessions: SessionItem[];
   earliestDate: string;
 };
@@ -84,14 +84,15 @@ function SessionBadge({ label, color, status, C, px, styles }: { label: string; 
 function WeekendCard({ item, expanded, onPress, C, px, styles, mode }: { item: RaceWeekend; expanded: boolean; onPress: () => void; C: any; px: any; styles: any; mode: "dark" | "light" }) {
   const isDone = item.status === "done";
   const isLive = item.status === "live";
-  const borderColor = isLive ? C.accent : isDone ? C.border : C.borderBright;
+  const isInProgress = item.status === "inprogress";
+  const borderColor = isLive ? C.accent : isInProgress ? C.yellow : isDone ? C.border : C.borderBright;
   const bg = isLive ? C.accentDim : isDone ? C.bgPanel : C.bgCard;
   const track = trackOutlineSource(mode, item.country, item.location, item.circuit);
 
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
       <View style={[styles.card, { borderColor, backgroundColor: bg }]}>
-        <View style={[styles.accent, { backgroundColor: isLive ? C.accent : isDone ? C.greyDark : C.borderBright }]} />
+        <View style={[styles.accent, { backgroundColor: isLive ? C.accent : isInProgress ? C.yellow : isDone ? C.greyDark : C.borderBright }]} />
         <View style={styles.cardMain}>
           <View style={styles.cardTop}>
             <View style={styles.roundBox}>
@@ -102,7 +103,7 @@ function WeekendCard({ item, expanded, onPress, C, px, styles, mode }: { item: R
             <Text style={{ fontSize: 22 }}>{item.flag}</Text>
             <View style={styles.nameBlock}>
               <View style={styles.nameRow}>
-                <Text style={[px.h3, { color: isLive ? C.accent : isDone ? C.grey : C.white }]}>
+                <Text style={[px.h3, { color: isLive ? C.accent : isInProgress ? C.yellow : isDone ? C.grey : C.white }]}>
                   {item.country.toUpperCase().slice(0, 14)}
                 </Text>
                 {item.isSprint && (
@@ -114,6 +115,12 @@ function WeekendCard({ item, expanded, onPress, C, px, styles, mode }: { item: R
                   <View style={[styles.livePill, { backgroundColor: C.accent }]}>
                     <View style={[styles.livePillDot, { backgroundColor: C.bg }]} />
                     <Text style={[px.label, { color: C.bg, fontSize: 4 }]}>LIVE</Text>
+                  </View>
+                )}
+                {isInProgress && (
+                  <View style={[styles.inProgPill, { borderColor: C.yellow }]}>
+                    <Text style={{ fontSize: 8 }}>⏳</Text>
+                    <Text style={[px.label, { color: C.yellow, fontSize: 4 }]}>ON NOW</Text>
                   </View>
                 )}
                 {isDone && (
@@ -189,7 +196,15 @@ export default function ScheduleScreen() {
         s.session_name?.toLowerCase().includes("sprint")
       );
       const raceSession = meetingSessions.find((s) => s.session_type === "Race");
-      const weekendStatus = raceSession ? getRaceStatus(raceSession, now) : "upcoming";
+      const raceStatus = raceSession ? getRaceStatus(raceSession, now) : "upcoming";
+      const started = parseDate(first?.date_start) > 0 && now >= parseDate(first?.date_start);
+      // done = race finished; live = race running; inprogress = weekend under
+      // way (practice/quali happening) but the race hasn't run yet.
+      const weekendStatus: RaceWeekend["status"] =
+        raceStatus === "done" ? "done"
+        : raceStatus === "live" ? "live"
+        : started ? "inprogress"
+        : "upcoming";
 
       result.push({
         meetingKey,
@@ -208,10 +223,10 @@ export default function ScheduleScreen() {
     return result.sort((a, b) => parseDate(a.earliestDate) - parseDate(b.earliestDate));
   }, [allSessionsQuery.data, now]);
 
-  const liveMeetingKey = weekends.find((w) => w.status === "live")?.meetingKey;
+  const currentMeetingKey = weekends.find((w) => w.status === "live" || w.status === "inprogress")?.meetingKey;
   React.useEffect(() => {
-    if (liveMeetingKey != null) setExpanded(liveMeetingKey);
-  }, [liveMeetingKey]);
+    if (currentMeetingKey != null) setExpanded(currentMeetingKey);
+  }, [currentMeetingKey]);
 
   const done = weekends.filter((w) => w.status === "done").length;
   const total = weekends.length;
@@ -235,7 +250,7 @@ export default function ScheduleScreen() {
               key={w.meetingKey}
               style={[
                 styles.progressSeg,
-                { backgroundColor: w.status === "done" ? C.green : w.status === "live" ? C.accent : C.border },
+                { backgroundColor: w.status === "done" ? C.green : w.status === "live" ? C.accent : w.status === "inprogress" ? C.yellow : C.border },
               ]}
             />
           ))}
@@ -302,6 +317,7 @@ function createStyles(C: any, scale: number) {
     livePill: { flexDirection: "row", alignItems: "center", gap: m(3), paddingHorizontal: m(4), paddingVertical: m(2) },
     livePillDot: { width: 4, height: 4 },
     donePill: { borderWidth: 1, paddingHorizontal: m(4), paddingVertical: m(1) },
+    inProgPill: { flexDirection: "row", alignItems: "center", gap: m(3), borderWidth: 1, paddingHorizontal: m(4), paddingVertical: m(1) },
     sessionsRow: { flexDirection: "row", flexWrap: "wrap", gap: m(6), marginTop: m(10), paddingTop: m(8), borderTopWidth: 1 },
     sessionBadge: { borderWidth: 1, paddingHorizontal: m(6), paddingVertical: m(4), minWidth: m(38), alignItems: "center", position: "relative" },
     sessionLiveDot: { position: "absolute", top: 2, right: 2, width: 4, height: 4 },
