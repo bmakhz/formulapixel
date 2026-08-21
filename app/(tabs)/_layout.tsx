@@ -1,16 +1,82 @@
 import { Tabs } from "expo-router";
-import { View, Text, StyleSheet } from "react-native";
+import { View, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useThemeTokens } from "../../components/theme";
 import { useActiveRaceSession, getRaceStatus } from "../../hooks/useOpenF1";
 
+// ── Pixel glyphs (7×7 grids, "#" = filled pixel) ─────────────────
+const ICONS: Record<string, string[]> = {
+  home: [
+    "...#...",
+    "..###..",
+    ".#####.",
+    "#######",
+    "#.....#",
+    "#.###.#",
+    "#.###.#",
+  ],
+  live: [
+    "##.....",
+    "####...",
+    "######.",
+    "#######",
+    "######.",
+    "####...",
+    "##.....",
+  ],
+  standings: [
+    "#######",
+    "#.....#",
+    "#.....#",
+    ".#####.",
+    "...#...",
+    "..###..",
+    ".#####.",
+  ],
+  schedule: [
+    ".#...#.",
+    "#######",
+    "#.#.#.#",
+    "#######",
+    "#.#.#.#",
+    "#######",
+    "#.#.#.#",
+  ],
+  settings: [
+    "..#.#..",
+    "#######",
+    ".#...#.",
+    "#.....#",
+    ".#...#.",
+    "#######",
+    "..#.#..",
+  ],
+};
+
+function PixelGlyph({ pattern, color, pixel = 3 }: { pattern: string[]; color: string; pixel?: number }) {
+  return (
+    <View>
+      {pattern.map((row, y) => (
+        <View key={y} style={{ flexDirection: "row" }}>
+          {row.split("").map((cell, x) => (
+            <View
+              key={x}
+              style={{ width: pixel, height: pixel, backgroundColor: cell === "#" ? color : "transparent" }}
+            />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function PixelTabIcon({
-  label,
+  icon,
   focused,
   isLive,
   C,
 }: {
-  label: string;
+  icon: keyof typeof ICONS;
   focused: boolean;
   isLive?: boolean;
   C: any;
@@ -25,9 +91,7 @@ function PixelTabIcon({
           </View>
         </View>
       )}
-      <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
-        {label}
-      </Text>
+      <PixelGlyph pattern={ICONS[icon]} color={focused ? C.accent : C.greyDark} />
     </View>
   );
 }
@@ -51,41 +115,33 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="HOME" focused={focused} C={C} />
-          ),
+          tabBarIcon: ({ focused }) => <PixelTabIcon icon="home" focused={focused} C={C} />,
         }}
       />
       <Tabs.Screen
         name="live"
         options={{
           tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="LIVE" focused={focused} isLive={isRaceLive} C={C} />
+            <PixelTabIcon icon="live" focused={focused} isLive={isRaceLive} C={C} />
           ),
         }}
       />
       <Tabs.Screen
         name="standings"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="STND" focused={focused} C={C} />
-          ),
+          tabBarIcon: ({ focused }) => <PixelTabIcon icon="standings" focused={focused} C={C} />,
         }}
       />
       <Tabs.Screen
         name="schedule"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="RACE" focused={focused} C={C} />
-          ),
+          tabBarIcon: ({ focused }) => <PixelTabIcon icon="schedule" focused={focused} C={C} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <PixelTabIcon label="SET" focused={focused} C={C} />
-          ),
+          tabBarIcon: ({ focused }) => <PixelTabIcon icon="settings" focused={focused} C={C} />,
         }}
       />
     </Tabs>
@@ -119,19 +175,11 @@ function createStyles(C: any, bottomInset: number) {
     borderTopColor: C.accent,
     backgroundColor: "#1a0005",
   },
-  iconLabel: {
-    fontFamily: "PressStart2P",
-    fontSize: 7,
-    color: C.greyDark,
-    lineHeight: 12,
-  },
-  iconLabelActive: {
-    color: C.accent,
-  },
   liveDotWrap: {
     position: "absolute",
     top: 6,
     right: 4,
+    zIndex: 1,
   },
   liveDotOuter: {
     width: 8,
