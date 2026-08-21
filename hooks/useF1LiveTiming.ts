@@ -38,7 +38,10 @@ export type SessionMeta = {
   finished: boolean;
   part: number | null;  // qualifying segment 1/2/3 (else null)
   noEntries: number[] | null; // cars per part, e.g. [22,16,10]
-  clock: string | null; // ExtrapolatedClock.Remaining ("HH:MM:SS")
+  clock: string | null;      // ExtrapolatedClock.Remaining ("HH:MM:SS")
+  clockUtc: string | null;   // timestamp that Remaining was accurate at
+  extrapolating: boolean;    // true = count down locally from clock/clockUtc
+  gmtOffset: string | null;  // track UTC offset, e.g. "02:00:00"
 };
 
 // ── Recursive merge-patch (mirrors the server's merge) ─────────
@@ -308,6 +311,11 @@ export function useF1LiveTiming(baseUrl: string | null, enabled: boolean) {
       clock: typeof stateRef.current?.ExtrapolatedClock?.Remaining === "string"
         ? stateRef.current.ExtrapolatedClock.Remaining
         : null,
+      clockUtc: typeof stateRef.current?.ExtrapolatedClock?.Utc === "string"
+        ? stateRef.current.ExtrapolatedClock.Utc
+        : null,
+      extrapolating: stateRef.current?.ExtrapolatedClock?.Extrapolating === true,
+      gmtOffset: typeof info?.GmtOffset === "string" ? info.GmtOffset : null,
     };
   }, [tick]);
 

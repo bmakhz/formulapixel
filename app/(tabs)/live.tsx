@@ -57,7 +57,7 @@ function SectorCell({ value, styles }: { value: number | null; styles: any }) {
 // ── Driver row ──────────────────────────────────────────────────
 type DriverItem = ReturnType<typeof useLiveRaceData>["rows"][number];
 
-function DriverRow({ driver, mode, C, px, styles }: { driver: DriverItem; mode: ViewMode; C: any; px: any; styles: any }) {
+function DriverRow({ driver, mode, quali, C, px, styles }: { driver: DriverItem; mode: ViewMode; quali?: boolean; C: any; px: any; styles: any }) {
   const gapText = mode === "gap" ? driver.gap : driver.gapToNext;
   const knockedOut = driver.knockedOut === true;
   const cutoff = driver.cutoff === true && !knockedOut; // in the drop zone now
@@ -105,12 +105,20 @@ function DriverRow({ driver, mode, C, px, styles }: { driver: DriverItem; mode: 
         <Text style={[px.label, { color: C.greyDark, fontSize: 5 }]}>PIT</Text>
       </View>
 
-      {/* S1 S2 S3 */}
-      <View style={styles.sectorsCol}>
-        <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[0]} styles={styles} /></View>
-        <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[1]} styles={styles} /></View>
-        <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[2]} styles={styles} /></View>
-      </View>
+      {/* Quali: best lap time. Otherwise: S1 S2 S3 sectors */}
+      {quali ? (
+        <View style={styles.sectorsCol}>
+          <Text style={[px.mono, { fontSize: 7, color: C.white, textAlign: "center" }]} numberOfLines={1}>
+            {formatLapTime(driver.bestLapTime)}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.sectorsCol}>
+          <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[0]} styles={styles} /></View>
+          <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[1]} styles={styles} /></View>
+          <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[2]} styles={styles} /></View>
+        </View>
+      )}
 
       {/* BEST LAP */}
       <View style={styles.lapCol}>
@@ -140,21 +148,59 @@ function rcColor(flag: string, category: string, C: any): string {
   return C.greyDark;
 }
 
-function rcTime(utc: string): string {
-  const m = utc.match(/T(\d{2}:\d{2})/);
-  return m ? m[1] : "--:--";
+function parseHMS(s?: string | null): number | null {
+  if (!s) return null;
+  const m = s.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+  return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
 }
 
-// "00:17:56" -> "17:56" (drop the hours when zero)
-function formatSessionClock(v?: string | null): string | null {
-  if (!v) return null;
-  const m = v.match(/(\d{1,2}):(\d{2}):(\d{2})/);
-  if (!m) return v;
-  const [, h, mm, ss] = m;
-  return Number(h) > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+function formatCountdown(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${p(m)}:${p(sec)}`;
 }
 
-function RaceControlPanel({ messages, C, px, styles }: { messages: RaceControlItem[]; C: any; px: any; styles: any }) {
+// Live segment countdown: extrapolate locally from the last known value.
+function liveCountdown(sess: { clock: string | null; clockUtc: string | null; extrapolating: boolean } | null, nowMs: number): string | null {
+  const base = parseHMS(sess?.clock);
+  if (base == null) return null;
+  if (!sess?.extrapolating || !sess?.clockUtc) return formatCountdown(base);
+  const anchor = Date.parse(/[Zz]$|[+\-]\d{2}:?\d{2}$/.test(sess.clockUtc) ? sess.clockUtc : sess.clockUtc + "Z");
+  if (Number.isNaN(anchor)) return formatCountdown(base);
+  return formatCountdown(base - (nowMs - anchor) / 1000);
+}
+
+// Track UTC offset ("02:00:00" / "-05:00:00") -> milliseconds.
+function offsetMs(gmt?: string | null): number {
+  if (!gmt) return 0;
+  const m = gmt.match(/(-?)(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return 0;
+  const sign = m[1] === "-" ? -1 : 1;
+  return sign * (Number(m[2]) * 3600 + Number(m[3]) * 60 + Number(m[4] || 0)) * 1000;
+}
+
+// Format a UTC instant (ms) in track-local time.
+function trackHHMMSS(ms: number, offMs: number, withSeconds = true): string {
+  const d = new Date(ms + offMs);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const base = `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+  return withSeconds ? `${base}:${p(d.getUTCSeconds())}` : base;
+}
+
+// A feed UTC string ("2026-08-22T14:31:27" or with Z) -> track-local HH:MM.
+function toTrackTime(utc: string, offMs: number): string {
+  const ms = Date.parse(/[Zz]$|[+\-]\d{2}:?\d{2}$/.test(utc) ? utc : utc + "Z");
+  if (Number.isNaN(ms)) {
+    const m = utc.match(/T(\d{2}:\d{2})/);
+    return m ? m[1] : "--:--";
+  }
+  return trackHHMMSS(ms, offMs, false);
+}
+
+function RaceControlPanel({ messages, offMs, trackTime, C, px, styles }: { messages: RaceControlItem[]; offMs: number; trackTime: string | null; C: any; px: any; styles: any }) {
   const [open, setOpen] = useState(false);
   if (!messages.length) return null;
   const latest = messages[0];
@@ -171,6 +217,7 @@ function RaceControlPanel({ messages, C, px, styles }: { messages: RaceControlIt
           </Text>
         )}
         {open && <Text style={[px.label, { color: C.grey, flex: 1 }]}>RACE CONTROL</Text>}
+        {trackTime && <Text style={[px.label, { color: C.cyan }]}>{trackTime}</Text>}
         <Text style={[px.label, { color: C.grey }]}>{messages.length}</Text>
         <Text style={[px.label, { color: C.accent }]}>{open ? "[-]" : "[+]"}</Text>
       </TouchableOpacity>
@@ -180,7 +227,7 @@ function RaceControlPanel({ messages, C, px, styles }: { messages: RaceControlIt
           {shown.map((m, i) => (
             <View key={`${m.utc}-${i}`} style={styles.rcRow}>
               <View style={[styles.rcRowStripe, { backgroundColor: rcColor(m.flag, m.category, C) }]} />
-              <Text style={[px.label, { color: C.greyDark, width: 34 }]}>{rcTime(m.utc)}</Text>
+              <Text style={[px.label, { color: C.greyDark, width: 34 }]}>{toTrackTime(m.utc, offMs)}</Text>
               {m.racingNumber && (
                 <Text style={[px.label, { color: C.cyan, width: 18 }]}>#{m.racingNumber}</Text>
               )}
@@ -198,6 +245,12 @@ export default function LiveScreen() {
   const { C, px, statusBarStyle, mode: themeMode, scaleValue } = useThemeTokens();
   const styles = React.useMemo(() => createStyles(C, scaleValue), [C, scaleValue]);
   const [mode, setMode] = useState<ViewMode>("gap");
+  // 1s ticker drives the extrapolated segment countdown + the track clock.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
   const speedUnit = useSettingsStore((s) => s.speedUnit);
   const temperatureUnit = useSettingsStore((s) => s.temperatureUnit);
   const realtimeUrl = useSettingsStore((s) => s.realtimeUrl);
@@ -226,7 +279,9 @@ export default function LiveScreen() {
   const isQuali = /quali|shootout/i.test(sessionName);
   const segPrefix = /sprint/i.test(sessionName) ? "SQ" : "Q";
   const segment = useSse && isQuali && sess?.part ? `${segPrefix}${sess.part}` : null;
-  const clock = formatSessionClock(sess?.clock);
+  const offMs = offsetMs(sess?.gmtOffset);
+  const countdown = liveCountdown(sess, nowMs);
+  const trackTime = sess ? trackHHMMSS(nowMs, offMs) : null;
   // Cutoff position: cars advancing to the next part sit above this line.
   const cutoffAfter = useSse && isQuali && sess?.part && sess.part < 3 && sess.noEntries
     ? sess.noEntries[sess.part] ?? null
@@ -263,7 +318,7 @@ export default function LiveScreen() {
             <Text style={[px.label, { color: isLive ? C.accent : C.grey }]}>{isLive ? "LIVE" : isRaceOver ? "FINISHED" : "LATEST"}</Text>
             <Text style={[px.label, { color: C.cyan }]}>{sessionLabel}</Text>
             {segment && <Text style={[px.label, { color: C.yellow }]}>{segment}</Text>}
-            {isLive && clock && <Text style={[px.label, { color: C.grey }]}>{clock}</Text>}
+            {isLive && countdown && <Text style={[px.label, { color: C.grey }]}>{countdown}</Text>}
             {isRaceOver && <Text style={[px.label, { color: C.yellow }]}>🏁</Text>}
           </View>
           <View style={styles.titleRow}>
@@ -274,7 +329,7 @@ export default function LiveScreen() {
         {segment ? (
           <View style={styles.lapBox}>
             <Text style={[px.h1, { color: C.yellow }]}>{segment}</Text>
-            <Text style={[px.label, { color: C.grey, marginTop: 2 }]}>{clock ?? "--:--"}</Text>
+            <Text style={[px.label, { color: C.grey, marginTop: 2 }]}>{countdown ?? "--:--"}</Text>
           </View>
         ) : (
           <View style={styles.lapBox}>
@@ -302,10 +357,10 @@ export default function LiveScreen() {
       </View>
 
       {/* ── Race control ── */}
-      <RaceControlPanel messages={raceControl} C={C} px={px} styles={styles} />
+      <RaceControlPanel messages={raceControl} offMs={offMs} trackTime={trackTime} C={C} px={px} styles={styles} />
 
       {/* ── Column headers ── */}
-      <ScrollableHeaders mode={mode} onToggle={() => setMode(m => m === "gap" ? "interval" : "gap")} C={C} styles={styles} />
+      <ScrollableHeaders mode={mode} onToggle={() => setMode(m => m === "gap" ? "interval" : "gap")} quali={isQuali && useSse} C={C} styles={styles} />
 
       {/* ── Driver list ── */}
       {liveData.isLoading && liveData.rows.length === 0 ? (
@@ -318,7 +373,7 @@ export default function LiveScreen() {
           keyExtractor={(d) => String(d.driverNumber)}
           renderItem={({ item, index }) => (
             <>
-              <DriverRow driver={item} mode={mode} C={C} px={px} styles={styles} />
+              <DriverRow driver={item} mode={mode} quali={isQuali && useSse} C={C} px={px} styles={styles} />
               {cutoffAfter != null && index === cutoffAfter - 1 && (
                 <View style={styles.elimLine}>
                   <Text style={[px.label, { color: C.accent, fontSize: 6 }]}>▼ ELIMINATION ▼</Text>
@@ -336,7 +391,7 @@ export default function LiveScreen() {
   );
 }
 
-function ScrollableHeaders({ mode, onToggle, C, styles }: { mode: ViewMode; onToggle: () => void; C: any; styles: any }) {
+function ScrollableHeaders({ mode, onToggle, quali, C, styles }: { mode: ViewMode; onToggle: () => void; quali?: boolean; C: any; styles: any }) {
   return (
     <View style={styles.colHeader}>
       {/* Spacers mirror the row's team stripe + livery slot exactly */}
@@ -349,7 +404,7 @@ function ScrollableHeaders({ mode, onToggle, C, styles }: { mode: ViewMode; onTo
       </TouchableOpacity>
       <Text style={[styles.colText, styles.colTyr]}>TYR</Text>
       <Text style={[styles.colText, { width: 30, textAlign: 'center' }]}>PIT</Text>
-      <Text style={[styles.colText, { width: 80, paddingLeft: 2 }]}>S1·S2·S3</Text>
+      <Text style={[styles.colText, { width: 80, paddingLeft: 2, textAlign: quali ? "center" : "left" }]}>{quali ? "BEST LAP" : "S1·S2·S3"}</Text>
       <Text style={[styles.colText, { width: 65, textAlign: 'right' }]}>BEST</Text>
       <Text style={[styles.colText, { width: 65, textAlign: 'right' }]}>LAST</Text>
     </View>
