@@ -108,13 +108,13 @@ export const px = StyleSheet.create({
 });
 
 export type ThemeMode = "dark" | "light";
-export type ScalePreset = "small" | "normal" | "large";
+export type ScalePreset = "small" | "medium" | "large";
 type Palette = Record<keyof typeof C, string>;
 
 export function scaleForPreset(scale: ScalePreset): number {
-  if (scale === "small") return 0.9;
-  if (scale === "large") return 1.15;
-  return 1;
+  if (scale === "large") return 1.3;
+  if (scale === "medium") return 1.15;
+  return 1; // small
 }
 
 export function paletteForMode(mode: ThemeMode): Palette {

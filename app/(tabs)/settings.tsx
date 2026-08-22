@@ -108,8 +108,8 @@ export default function SettingsScreen() {
   const setTemperatureUnit = useSettingsStore((s) => s.setTemperatureUnit);
 
   const nextScale = () => {
-    if (scale === "small") return setScale("normal");
-    if (scale === "normal") return setScale("large");
+    if (scale === "small") return setScale("medium");
+    if (scale === "medium") return setScale("large");
     return setScale("small");
   };
 
