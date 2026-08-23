@@ -9,6 +9,7 @@ import { useSettingsStore } from "../store/useSettingsStore";
 import { formatSpeed, formatTemperature } from "../utils/unitConversion";
 import { teamLiverySource, trackOutlineSource } from "../utils/imageMaps";
 import { sx } from "../utils/sx";
+import { useIsDesktop } from "../hooks/useBreakpoint";
 
 // Ported from f1-live/app/(tabs)/live.tsx
 
@@ -101,12 +102,13 @@ function DriverRow({ driver, mode, quali, C, px, styles }: { driver: DriverItem;
         </View>
       )}
 
+      {/* LAST, then BEST — swapped from the original BEST/LAST order */}
       <View style={styles.lapCol}>
-        <Text style={styles.lapText}>{formatLapTime(driver.bestLapTime)}</Text>
+        <Text style={styles.lapText}>{formatLapTime(driver.lapTime)}</Text>
       </View>
 
       <View style={styles.lapCol}>
-        <Text style={styles.lapText}>{formatLapTime(driver.lapTime)}</Text>
+        <Text style={styles.lapText}>{formatLapTime(driver.bestLapTime)}</Text>
       </View>
     </View>
   );
@@ -216,7 +218,8 @@ function RaceControlPanel({ messages, offMs, trackTime, C, px, styles }: { messa
 // ── Main screen ─────────────────────────────────────────────────
 export default function LiveScreen() {
   const { C, px, mode: themeMode, scaleValue } = useThemeTokens();
-  const styles = useMemo(() => createStyles(C, scaleValue), [C, scaleValue]);
+  const isDesktop = useIsDesktop();
+  const styles = useMemo(() => createStyles(C, scaleValue, isDesktop), [C, scaleValue, isDesktop]);
   const [mode, setMode] = useState<ViewMode>("gap");
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -361,13 +364,14 @@ function ScrollableHeaders({ mode, onToggle, quali, C, styles }: { mode: ViewMod
       <Text style={sx(styles.colText, styles.colTyr)}>TYR</Text>
       <Text style={sx(styles.colText, { width: 30, textAlign: "center" })}>PIT</Text>
       <Text style={sx(styles.colText, { width: 80, paddingLeft: 2, textAlign: quali ? "center" : "left" })}>{quali ? "BEST LAP" : "S1·S2·S3"}</Text>
-      <Text style={sx(styles.colText, { width: 65, textAlign: "right" })}>BEST</Text>
+      {/* LAST, then BEST — matches the swapped row order below */}
       <Text style={sx(styles.colText, { width: 65, textAlign: "right" })}>LAST</Text>
+      <Text style={sx(styles.colText, { width: 65, textAlign: "right" })}>BEST</Text>
     </View>
   );
 }
 
-function createStyles(C: any, scale: number) {
+function createStyles(C: any, scale: number, isDesktop: boolean) {
   const s = Math.max(0.9, Math.min(1.2, scale));
   const m = (n: number) => Math.round(n * s);
   return StyleSheet.create({
@@ -401,6 +405,8 @@ function createStyles(C: any, scale: number) {
       flexDirection: "row", alignItems: "center",
       paddingLeft: 0, paddingRight: m(8), paddingTop: m(8), paddingBottom: m(8),
       borderBottomWidth: 1, borderBottomColor: C.borderBright, backgroundColor: C.bgPanel,
+      // Desktop: spread columns across the full width instead of leaving slack.
+      ...(isDesktop ? { justifyContent: "space-between" } : {}),
     } as CSSProperties,
     colText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey } as CSSProperties,
     colStripeSpacer: { width: 3, marginRight: m(6) } as CSSProperties,
@@ -414,20 +420,31 @@ function createStyles(C: any, scale: number) {
       backgroundColor: C.accentDim, borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.accent,
     } as CSSProperties,
 
-    driverRow: { flexDirection: "row", alignItems: "center", paddingTop: m(8), paddingBottom: m(8), paddingRight: m(8), minHeight: m(48) } as CSSProperties,
+    driverRow: { flexDirection: "row", alignItems: "center", paddingTop: m(8), paddingBottom: m(8), paddingRight: m(8), minHeight: m(48), ...(isDesktop ? { justifyContent: "space-between" } : {}) } as CSSProperties,
     teamStripe: { width: 3, height: m(38), marginRight: m(6) } as CSSProperties,
     liveryWrap: { width: m(30), height: m(20), marginRight: m(6), alignItems: "center", justifyContent: "center" } as CSSProperties,
     livery: { width: m(30), height: m(20) } as CSSProperties,
 
     posWrap: { width: 34, alignItems: "flex-start", paddingLeft: 4 } as CSSProperties,
-    driverCol: { flex: 1, minWidth: 70 } as CSSProperties,
+    // Driver name gets a fixed width on desktop instead of flex:1, so the
+    // row's justifyContent spreads leftover space across all columns
+    // instead of piling it all into one gap after DRIVER.
+    driverCol: isDesktop ? ({ width: 200 } as CSSProperties) : ({ flex: 1, minWidth: 70 } as CSSProperties),
     gapCol: { width: 62 } as CSSProperties,
 
     tireBadge: { width: 38, borderWidth: 1, alignItems: "center", paddingTop: m(2), paddingBottom: m(2), marginRight: m(4) } as CSSProperties,
     tireCompound: { fontFamily: "PressStart2P", fontSize: 9, fontWeight: 900 } as CSSProperties,
     tireAge: { fontFamily: "PressStart2P", fontSize: 6, color: "#888", marginTop: 1 } as CSSProperties,
 
-    sectorsCol: { width: 80, gap: 1 } as CSSProperties,
+    // Was column-stacked (S1/S2/S3 on top of each other) because
+    // sectorWrapper was referenced but never actually defined — so the
+    // three cells fell back to View's default column layout. Fixed to a
+    // real horizontal row, with extra breathing room on desktop.
+    sectorsCol: {
+      width: isDesktop ? 120 : 80,
+      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    } as CSSProperties,
+    sectorWrapper: { alignItems: "center" } as CSSProperties,
     sectorText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey } as CSSProperties,
 
     lapCol: { width: 65, alignItems: "flex-end" } as CSSProperties,
