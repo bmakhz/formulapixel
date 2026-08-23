@@ -1,0 +1,59 @@
+@font-face {
+  /* Unquoted-safe name (no space) to match every hardcoded
+     fontFamily: "PressStart2P" string ported verbatim from f1-live. */
+  font-family: "PressStart2P";
+  src: url("/fonts/PressStart2P-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  /* RN's borderWidth/borderColor always imply a solid border; CSS defaults
+     to `none`. Setting this globally lets ported styles that only specify
+     borderWidth/borderColor (no borderStyle) render correctly as-is — safe
+     because a solid style with 0 width is still invisible. */
+  border-style: solid;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overscroll-behavior: none;
+}
+
+body {
+  background: #0d0d0d;
+  color: #e8e8e8;
+  font-family: "PressStart2P", monospace;
+  -webkit-font-smoothing: none;
+  overflow: hidden; /* each screen owns its own scroll region */
+}
+
+img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+button {
+  font-family: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+}
+
+/* Ported from live.tsx's BlinkDot (was Animated.loop + Animated.timing,
+   500ms to 0 then 500ms back to 1 — same 1s cycle here). */
+@keyframes blink-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.blink-dot {
+  animation: blink-dot 1s ease-in-out infinite;
+}
