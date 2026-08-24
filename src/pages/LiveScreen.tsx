@@ -1,19 +1,16 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, StatusBar, Image, ScrollView, SafeAreaView,
 } from "../components/primitives";
 import { useActiveRaceSession, useLiveRaceData, formatLapTime, getRaceStatus } from "../hooks/useOpenF1";
 import { useF1LiveTiming, type RaceControlItem } from "../hooks/useF1LiveTiming";
 import { useThemeTokens } from "../theme";
-import { useSettingsStore } from "../store/useSettingsStore";
+import { useSettingsStore, type LiveColumns } from "../store/useSettingsStore";
 import { formatSpeed, formatTemperature } from "../utils/unitConversion";
 import { teamLiverySource, trackOutlineSource } from "../utils/imageMaps";
 import { sx } from "../utils/sx";
-import { useIsDesktop } from "../hooks/useBreakpoint";
 
 // Ported from f1-live/app/(tabs)/live.tsx
-
-type ViewMode = "gap" | "interval";
 
 // ── Pulsing live dot ── (was RN Animated.loop; now a CSS keyframe, see index.css)
 function BlinkDot({ color }: { color: string }) {
@@ -44,72 +41,169 @@ function SectorCell({ value, styles }: { value: number | null; styles: any }) {
 }
 
 type DriverItem = ReturnType<typeof useLiveRaceData>["rows"][number];
+type ViewMode = "gap" | "interval";
 
-function DriverRow({ driver, mode, quali, C, px, styles }: { driver: DriverItem; mode: ViewMode; quali?: boolean; C: any; px: any; styles: any }) {
-  const gapText = mode === "gap" ? driver.gap : driver.gapToNext;
+// ── Dynamic column model ────────────────────────────────────────
+// Header and rows are both driven off this one array, so they can never
+// drift out of alignment, and hiding a column just drops its grid track.
+type LeaderColumn = {
+  key: string;
+  track: string;
+  align?: "start" | "center";
+  header: ReactNode;
+  cell: (d: DriverItem) => ReactNode;
+};
+
+function buildColumns(opts: {
+  liveColumns: LiveColumns;
+  quali: boolean;
+  mode: ViewMode;
+  onToggleGapInt: () => void;
+  C: any; px: any; styles: any;
+}): LeaderColumn[] {
+  const { liveColumns, quali, mode, onToggleGapInt, C, px, styles } = opts;
+  const cols: LeaderColumn[] = [];
+
+  if (liveColumns.pos) {
+    cols.push({
+      key: "pos", track: "minmax(26px, 0.5fr)",
+      header: <Text style={styles.colText}>POS</Text>,
+      cell: (d) => (
+        <Text style={sx(px.h3, { color: d.status !== "RUN" ? C.greyDark : C.white })}>
+          {d.status !== "RUN" ? "--" : String(d.position)}
+        </Text>
+      ),
+    });
+  }
+
+  cols.push({
+    key: "driver", track: "minmax(120px, 2fr)", align: "start",
+    header: <Text style={styles.colText}>DRIVER</Text>,
+    cell: (d) => {
+      const livery = teamLiverySource(d.team);
+      return (
+        <View style={styles.driverCell}>
+          <View style={sx(styles.teamStripe, { backgroundColor: d.teamColor })} />
+          <View style={styles.liveryWrap}>
+            {livery && <Image source={livery} style={styles.livery} resizeMode="contain" />}
+          </View>
+          <View style={styles.driverNameBlock}>
+            <Text style={sx(px.h2, { color: d.teamColor || C.white })}>{d.short}</Text>
+            <Text style={sx(px.label, { color: C.greyDark, marginTop: 2, fontSize: 5 })} numberOfLines={1}>
+              {d.team.toUpperCase().slice(0, 10)}
+            </Text>
+          </View>
+        </View>
+      );
+    },
+  });
+
+  cols.push({
+    key: "gap", track: "minmax(48px, 1fr)",
+    header: (
+      <TouchableOpacity onClick={onToggleGapInt}>
+        <Text style={sx(styles.colText, { color: C.accent })}>{mode === "gap" ? "[GAP]" : "[INT]"}</Text>
+      </TouchableOpacity>
+    ),
+    cell: (d) => {
+      const gapText = mode === "gap" ? d.gap : d.gapToNext;
+      const knockedOut = d.knockedOut === true;
+      const nonRunning = d.status !== "RUN";
+      return (
+        <Text style={sx(px.label, { color: knockedOut || nonRunning || gapText === "LEADER" ? C.accent : C.white, fontSize: 6 })} numberOfLines={1}>
+          {knockedOut ? "OUT" : nonRunning ? d.status : gapText === "LEADER" ? "LDR" : gapText}
+        </Text>
+      );
+    },
+  });
+
+  if (liveColumns.tyre) {
+    cols.push({
+      key: "tyre", track: "minmax(40px, 0.8fr)",
+      header: <Text style={styles.colText}>TYR</Text>,
+      cell: (d) => <TireBadge compound={d.compound} age={d.tireAge} C={C} styles={styles} />,
+    });
+  }
+
+  if (liveColumns.pit) {
+    cols.push({
+      key: "pit", track: "minmax(30px, 0.6fr)",
+      header: <Text style={styles.colText}>PIT</Text>,
+      cell: (d) => (
+        <View style={{ alignItems: "center" }}>
+          <Text style={sx(px.label, { color: C.grey })}>{d.pits}</Text>
+          <Text style={sx(px.label, { color: C.greyDark, fontSize: 5 })}>PIT</Text>
+        </View>
+      ),
+    });
+  }
+
+  if (liveColumns.sectors) {
+    if (quali) {
+      cols.push({
+        key: "bestlap", track: "minmax(60px, 1.5fr)",
+        header: <Text style={styles.colText}>BEST LAP</Text>,
+        cell: (d) => <Text style={sx(px.mono, { fontSize: 7, color: C.white })} numberOfLines={1}>{formatLapTime(d.bestLapTime)}</Text>,
+      });
+    } else {
+      for (let i = 0; i < 3; i++) {
+        cols.push({
+          key: `s${i + 1}`, track: "minmax(40px, 1fr)",
+          header: <Text style={styles.colText}>{`S${i + 1}`}</Text>,
+          cell: (d) => <SectorCell value={d.sectorTimes[i]} styles={styles} />,
+        });
+      }
+    }
+  }
+
+  if (liveColumns.last) {
+    cols.push({
+      key: "last", track: "minmax(50px, 1fr)",
+      header: <Text style={styles.colText}>LAST</Text>,
+      cell: (d) => <Text style={styles.lapText}>{formatLapTime(d.lapTime)}</Text>,
+    });
+  }
+  if (liveColumns.best) {
+    cols.push({
+      key: "best", track: "minmax(50px, 1fr)",
+      header: <Text style={styles.colText}>BEST</Text>,
+      cell: (d) => <Text style={styles.lapText}>{formatLapTime(d.bestLapTime)}</Text>,
+    });
+  }
+
+  return cols;
+}
+
+function gridTemplate(columns: LeaderColumn[]): string {
+  return columns.map((c) => c.track).join(" ");
+}
+
+function LeaderHeader({ columns, styles }: { columns: LeaderColumn[]; styles: any }) {
+  return (
+    <View style={sx(styles.gridHeader, { gridTemplateColumns: gridTemplate(columns) })}>
+      {columns.map((c) => (
+        <View key={c.key} style={sx(styles.cell, c.align === "start" ? styles.cellStart : styles.cellCenter)}>
+          {c.header}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function DriverRow({ driver, columns, C, styles }: { driver: DriverItem; columns: LeaderColumn[]; C: any; styles: any }) {
   const knockedOut = driver.knockedOut === true;
   const cutoff = driver.cutoff === true && !knockedOut;
   const nonRunning = driver.status !== "RUN";
   const rowBg = cutoff ? C.accentDim : nonRunning || knockedOut ? C.bgPanel : C.bg;
   const rowOpacity = knockedOut ? 0.4 : nonRunning ? 0.65 : 1;
-  const livery = teamLiverySource(driver.team);
 
   return (
-    <View style={sx(styles.driverRow, { backgroundColor: rowBg, opacity: rowOpacity })}>
-      <View style={sx(styles.teamStripe, { backgroundColor: driver.teamColor })} />
-
-      <View style={styles.posWrap}>
-        <Text style={sx(px.h3, { color: driver.status !== "RUN" ? C.greyDark : C.white })}>
-          {driver.status !== "RUN" ? "--" : String(driver.position).padStart(2, " ")}
-        </Text>
-      </View>
-
-      <View style={styles.liveryWrap}>
-        {livery && <Image source={livery} style={styles.livery} resizeMode="contain" />}
-      </View>
-
-      <View style={styles.driverCol}>
-        <Text style={sx(px.h2, { color: driver.teamColor || C.white })}>{driver.short}</Text>
-        <Text style={sx(px.label, { color: C.greyDark, marginTop: 2, fontSize: 5 })} numberOfLines={1}>
-          {driver.team.toUpperCase().slice(0, 10)}
-        </Text>
-      </View>
-
-      <View style={styles.gapCol}>
-        <Text style={sx(px.label, { color: knockedOut || nonRunning || gapText === "LEADER" ? C.accent : C.white, fontSize: 6 })} numberOfLines={1}>
-          {knockedOut ? "OUT" : nonRunning ? driver.status : gapText === "LEADER" ? "LDR" : gapText}
-        </Text>
-      </View>
-
-      <TireBadge compound={driver.compound} age={driver.tireAge} C={C} styles={styles} />
-
-      <View style={styles.pitsCol}>
-        <Text style={sx(px.label, { color: C.grey })}>{driver.pits}</Text>
-        <Text style={sx(px.label, { color: C.greyDark, fontSize: 5 })}>PIT</Text>
-      </View>
-
-      {quali ? (
-        <View style={styles.sectorsCol}>
-          <Text style={sx(px.mono, { fontSize: 7, color: C.white, textAlign: "center" })} numberOfLines={1}>
-            {formatLapTime(driver.bestLapTime)}
-          </Text>
+    <View style={sx(styles.gridRow, { gridTemplateColumns: gridTemplate(columns), backgroundColor: rowBg, opacity: rowOpacity })}>
+      {columns.map((c) => (
+        <View key={c.key} style={sx(styles.cell, c.align === "start" ? styles.cellStart : styles.cellCenter)}>
+          {c.cell(driver)}
         </View>
-      ) : (
-        <View style={styles.sectorsCol}>
-          <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[0]} styles={styles} /></View>
-          <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[1]} styles={styles} /></View>
-          <View style={styles.sectorWrapper}><SectorCell value={driver.sectorTimes[2]} styles={styles} /></View>
-        </View>
-      )}
-
-      {/* LAST, then BEST — swapped from the original BEST/LAST order */}
-      <View style={styles.lapCol}>
-        <Text style={styles.lapText}>{formatLapTime(driver.lapTime)}</Text>
-      </View>
-
-      <View style={styles.lapCol}>
-        <Text style={styles.lapText}>{formatLapTime(driver.bestLapTime)}</Text>
-      </View>
+      ))}
     </View>
   );
 }
@@ -218,8 +312,7 @@ function RaceControlPanel({ messages, offMs, trackTime, C, px, styles }: { messa
 // ── Main screen ─────────────────────────────────────────────────
 export default function LiveScreen() {
   const { C, px, mode: themeMode, scaleValue } = useThemeTokens();
-  const isDesktop = useIsDesktop();
-  const styles = useMemo(() => createStyles(C, scaleValue, isDesktop), [C, scaleValue, isDesktop]);
+  const styles = useMemo(() => createStyles(C, scaleValue), [C, scaleValue]);
   const [mode, setMode] = useState<ViewMode>("gap");
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -229,6 +322,7 @@ export default function LiveScreen() {
   const speedUnit = useSettingsStore((s) => s.speedUnit);
   const temperatureUnit = useSettingsStore((s) => s.temperatureUnit);
   const realtimeUrl = useSettingsStore((s) => s.realtimeUrl);
+  const liveColumns = useSettingsStore((s) => s.liveColumns);
   const raceSessions = useActiveRaceSession();
   const activeSession = raceSessions.liveSession ?? raceSessions.activeRace;
 
@@ -256,6 +350,19 @@ export default function LiveScreen() {
 
   const totalLaps = useSse ? sseData.totalLaps : null;
   const raceControl = useSse ? sseData.raceControl : [];
+
+  // Visible columns drive both the header and every row's grid template, so
+  // they stay aligned and the layout reflows when the user toggles columns.
+  const columns = useMemo(
+    () => buildColumns({
+      liveColumns,
+      quali: isQuali && useSse,
+      mode,
+      onToggleGapInt: () => setMode((mo) => (mo === "gap" ? "interval" : "gap")),
+      C, px, styles,
+    }),
+    [liveColumns, isQuali, useSse, mode, C, px, styles],
+  );
 
   const raceName = useSse
     ? (sess?.country || sess?.meetingName || "GRAND PRIX")
@@ -323,7 +430,7 @@ export default function LiveScreen() {
 
       <RaceControlPanel messages={raceControl} offMs={offMs} trackTime={trackTime} C={C} px={px} styles={styles} />
 
-      <ScrollableHeaders mode={mode} onToggle={() => setMode((m) => (m === "gap" ? "interval" : "gap"))} quali={isQuali && useSse} C={C} styles={styles} />
+      <LeaderHeader columns={columns} styles={styles} />
 
       {liveData.isLoading && liveData.rows.length === 0 ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -335,7 +442,7 @@ export default function LiveScreen() {
           keyExtractor={(d) => String(d.driverNumber)}
           renderItem={({ item, index }) => (
             <>
-              <DriverRow driver={item} mode={mode} quali={isQuali && useSse} C={C} px={px} styles={styles} />
+              <DriverRow driver={item} columns={columns} C={C} styles={styles} />
               {cutoffAfter != null && index === cutoffAfter - 1 && (
                 <View style={styles.elimLine}>
                   <Text style={sx(px.label, { color: C.accent, fontSize: 6 })}>▼ ELIMINATION ▼</Text>
@@ -351,27 +458,7 @@ export default function LiveScreen() {
   );
 }
 
-function ScrollableHeaders({ mode, onToggle, quali, C, styles }: { mode: ViewMode; onToggle: () => void; quali?: boolean; C: any; styles: any }) {
-  return (
-    <View style={styles.colHeader}>
-      <View style={styles.colStripeSpacer} />
-      <Text style={sx(styles.colText, { width: 34, paddingLeft: 4 })}>POS</Text>
-      <View style={styles.colLiverySpacer} />
-      <Text style={sx(styles.colText, { flex: 1, minWidth: 70 })}>DRIVER</Text>
-      <TouchableOpacity style={{ width: 62 }} onClick={onToggle}>
-        <Text style={sx(styles.colText, { color: C.accent })}>{mode === "gap" ? "[GAP]" : "[INT]"}</Text>
-      </TouchableOpacity>
-      <Text style={sx(styles.colText, styles.colTyr)}>TYR</Text>
-      <Text style={sx(styles.colText, { width: 30, textAlign: "center" })}>PIT</Text>
-      <Text style={sx(styles.colText, { width: 80, paddingLeft: 2, textAlign: quali ? "center" : "left" })}>{quali ? "BEST LAP" : "S1·S2·S3"}</Text>
-      {/* LAST, then BEST — matches the swapped row order below */}
-      <Text style={sx(styles.colText, { width: 65, textAlign: "right" })}>LAST</Text>
-      <Text style={sx(styles.colText, { width: 65, textAlign: "right" })}>BEST</Text>
-    </View>
-  );
-}
-
-function createStyles(C: any, scale: number, isDesktop: boolean) {
+function createStyles(C: any, scale: number) {
   const s = Math.max(0.9, Math.min(1.2, scale));
   const m = (n: number) => Math.round(n * s);
   return StyleSheet.create({
@@ -401,18 +488,23 @@ function createStyles(C: any, scale: number, isDesktop: boolean) {
     rcRow: { flexDirection: "row", alignItems: "center", gap: m(6), paddingLeft: m(9), paddingRight: m(9), paddingTop: m(4), paddingBottom: m(4), borderTopWidth: 1, borderTopColor: C.border } as CSSProperties,
     rcRowStripe: { width: 3, height: m(16) } as CSSProperties,
 
-    colHeader: {
-      flexDirection: "row", alignItems: "center",
-      paddingLeft: 0, paddingRight: m(8), paddingTop: m(8), paddingBottom: m(8),
+    // ── Leaderboard grid: header + every row share one column template, so
+    // they always align; equal columnGap gives even spacing; cells center
+    // their content under each heading. Hiding a column drops its track.
+    gridHeader: {
+      display: "grid", alignItems: "center", columnGap: m(10),
+      paddingLeft: m(8), paddingRight: m(8), paddingTop: m(8), paddingBottom: m(8),
       borderBottomWidth: 1, borderBottomColor: C.borderBright, backgroundColor: C.bgPanel,
-      // Desktop: spread columns across the full width instead of leaving slack.
-      ...(isDesktop ? { justifyContent: "space-between" } : {}),
     } as CSSProperties,
-    colText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey } as CSSProperties,
-    colStripeSpacer: { width: 3, marginRight: m(6) } as CSSProperties,
-    colLiverySpacer: { width: m(30), marginRight: m(6) } as CSSProperties,
-    colTyr: { width: 38, marginRight: m(4), textAlign: "center" } as CSSProperties,
+    gridRow: {
+      display: "grid", alignItems: "center", columnGap: m(10),
+      paddingLeft: m(8), paddingRight: m(8), minHeight: m(48),
+    } as CSSProperties,
+    cell: { flexDirection: "row", alignItems: "center", minWidth: 0, overflow: "hidden" } as CSSProperties,
+    cellCenter: { justifyContent: "center", textAlign: "center" } as CSSProperties,
+    cellStart: { justifyContent: "flex-start" } as CSSProperties,
 
+    colText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey } as CSSProperties,
     rowSep: { height: 1, backgroundColor: C.border } as CSSProperties,
 
     elimLine: {
@@ -420,34 +512,18 @@ function createStyles(C: any, scale: number, isDesktop: boolean) {
       backgroundColor: C.accentDim, borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.accent,
     } as CSSProperties,
 
-    driverRow: { flexDirection: "row", alignItems: "center", paddingTop: m(8), paddingBottom: m(8), paddingRight: m(8), minHeight: m(48), ...(isDesktop ? { justifyContent: "space-between" } : {}) } as CSSProperties,
-    teamStripe: { width: 3, height: m(38), marginRight: m(6) } as CSSProperties,
-    liveryWrap: { width: m(30), height: m(20), marginRight: m(6), alignItems: "center", justifyContent: "center" } as CSSProperties,
+    // Driver identity cluster: colour stripe + car livery + name/team.
+    driverCell: { flexDirection: "row", alignItems: "center", gap: m(6), minWidth: 0 } as CSSProperties,
+    driverNameBlock: { minWidth: 0, flexShrink: 1 } as CSSProperties,
+    teamStripe: { width: 3, height: m(38), flexShrink: 0 } as CSSProperties,
+    liveryWrap: { width: m(30), height: m(20), alignItems: "center", justifyContent: "center", flexShrink: 0 } as CSSProperties,
     livery: { width: m(30), height: m(20) } as CSSProperties,
 
-    posWrap: { width: 34, alignItems: "flex-start", paddingLeft: 4 } as CSSProperties,
-    // Driver name gets a fixed width on desktop instead of flex:1, so the
-    // row's justifyContent spreads leftover space across all columns
-    // instead of piling it all into one gap after DRIVER.
-    driverCol: isDesktop ? ({ width: 200 } as CSSProperties) : ({ flex: 1, minWidth: 70 } as CSSProperties),
-    gapCol: { width: 62 } as CSSProperties,
-
-    tireBadge: { width: 38, borderWidth: 1, alignItems: "center", paddingTop: m(2), paddingBottom: m(2), marginRight: m(4) } as CSSProperties,
+    tireBadge: { width: 38, borderWidth: 1, alignItems: "center", paddingTop: m(2), paddingBottom: m(2) } as CSSProperties,
     tireCompound: { fontFamily: "PressStart2P", fontSize: 9, fontWeight: 900 } as CSSProperties,
     tireAge: { fontFamily: "PressStart2P", fontSize: 6, color: "#888", marginTop: 1 } as CSSProperties,
 
-    // Was column-stacked (S1/S2/S3 on top of each other) because
-    // sectorWrapper was referenced but never actually defined — so the
-    // three cells fell back to View's default column layout. Fixed to a
-    // real horizontal row, with extra breathing room on desktop.
-    sectorsCol: {
-      width: isDesktop ? 120 : 80,
-      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    } as CSSProperties,
-    sectorWrapper: { alignItems: "center" } as CSSProperties,
     sectorText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey } as CSSProperties,
-
-    lapCol: { width: 65, alignItems: "flex-end" } as CSSProperties,
     lapText: { fontFamily: "PressStart2P", fontSize: 6, color: C.white } as CSSProperties,
   });
 }

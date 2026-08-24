@@ -1,8 +1,19 @@
 import { useMemo, type CSSProperties } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, SafeAreaView } from "../components/primitives";
 import { useThemeTokens } from "../theme";
-import { useSettingsStore } from "../store/useSettingsStore";
+import { useSettingsStore, type LiveColumnKey } from "../store/useSettingsStore";
 import { sx } from "../utils/sx";
+
+// Toggleable Live-tab columns, in display order. Driver (name/colour/car)
+// and GAP are always shown, so they're intentionally absent here.
+const LIVE_COLUMN_ROWS: { key: LiveColumnKey; label: string; sub: string }[] = [
+  { key: "pos", label: "POSITION", sub: "RACE POSITION NUMBER" },
+  { key: "tyre", label: "TYRE", sub: "COMPOUND + AGE BADGE" },
+  { key: "pit", label: "PIT STOPS", sub: "PIT STOP COUNT" },
+  { key: "sectors", label: "SECTORS", sub: "S1 / S2 / S3 TIMES" },
+  { key: "best", label: "BEST LAP", sub: "FASTEST LAP TIME" },
+  { key: "last", label: "LAST LAP", sub: "MOST RECENT LAP TIME" },
+];
 
 // Ported from f1-live/app/(tabs)/settings.tsx
 
@@ -72,6 +83,8 @@ export default function SettingsScreen() {
   const setScale = useSettingsStore((s) => s.setScale);
   const setSpeedUnit = useSettingsStore((s) => s.setSpeedUnit);
   const setTemperatureUnit = useSettingsStore((s) => s.setTemperatureUnit);
+  const liveColumns = useSettingsStore((s) => s.liveColumns);
+  const toggleLiveColumn = useSettingsStore((s) => s.toggleLiveColumn);
 
   const nextScale = () => {
     if (scale === "small") return setScale("medium");
@@ -113,6 +126,25 @@ export default function SettingsScreen() {
             onPress={() => setTemperatureUnit(temperatureUnit === "C" ? "F" : "C")}
             C={C} px={px} styles={styles}
           />
+        </View>
+
+        <SectionHeader title="LIVE COLUMNS" C={C} px={px} styles={styles} />
+        <Text style={sx(px.label, { color: C.greyDark, fontSize: 5, marginBottom: 8, lineHeight: "9px" })}>
+          CHOOSE WHICH COLUMNS SHOW ON THE LIVE TAB. DRIVER + GAP ALWAYS SHOWN.
+        </Text>
+        <View style={styles.card}>
+          {LIVE_COLUMN_ROWS.map((col, i) => (
+            <View key={col.key}>
+              {i > 0 && <View style={styles.cardSep} />}
+              <SettingRow
+                label={col.label}
+                sub={col.sub}
+                value={liveColumns[col.key]}
+                onToggle={() => toggleLiveColumn(col.key)}
+                C={C} px={px} styles={styles}
+              />
+            </View>
+          ))}
         </View>
 
         <View style={{ marginTop: 24, padding: 8, alignItems: "center" }}>
