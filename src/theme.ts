@@ -100,11 +100,15 @@ export function createPxTokens(scalePreset: ScalePreset, palette: Palette) {
 
 export type PxTokens = ReturnType<typeof createPxTokens>;
 
+// Scale is fixed at "medium" — there's no user-facing option to change it
+// (removed from Settings). Kept as a named preset rather than a bare number
+// so createPxTokens/scaleForPreset's shape is unchanged.
+const FIXED_SCALE: ScalePreset = "medium";
+
 export function useThemeTokens() {
   const mode = useSettingsStore((s) => s.mode);
-  const scalePreset = useSettingsStore((s) => s.scale);
   const C_ = useMemo(() => paletteForMode(mode), [mode]);
-  const px = useMemo(() => createPxTokens(scalePreset, C_), [scalePreset, C_]);
-  const scaleValue = scaleForPreset(scalePreset);
-  return { C: C_, px, mode, scalePreset, scaleValue };
+  const px = useMemo(() => createPxTokens(FIXED_SCALE, C_), [C_]);
+  const scaleValue = scaleForPreset(FIXED_SCALE);
+  return { C: C_, px, mode, scalePreset: FIXED_SCALE, scaleValue };
 }

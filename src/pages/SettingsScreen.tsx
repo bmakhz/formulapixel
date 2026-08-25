@@ -76,21 +76,13 @@ export default function SettingsScreen() {
   const { C, px } = useThemeTokens();
   const styles = useMemo(() => createStyles(C), [C]);
   const mode = useSettingsStore((s) => s.mode);
-  const scale = useSettingsStore((s) => s.scale);
   const speedUnit = useSettingsStore((s) => s.speedUnit);
   const temperatureUnit = useSettingsStore((s) => s.temperatureUnit);
   const setMode = useSettingsStore((s) => s.setMode);
-  const setScale = useSettingsStore((s) => s.setScale);
   const setSpeedUnit = useSettingsStore((s) => s.setSpeedUnit);
   const setTemperatureUnit = useSettingsStore((s) => s.setTemperatureUnit);
   const liveColumns = useSettingsStore((s) => s.liveColumns);
   const toggleLiveColumn = useSettingsStore((s) => s.toggleLiveColumn);
-
-  const nextScale = () => {
-    if (scale === "small") return setScale("medium");
-    if (scale === "medium") return setScale("large");
-    return setScale("small");
-  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -110,8 +102,6 @@ export default function SettingsScreen() {
             onToggle={(v) => setMode(v ? "dark" : "light")}
             C={C} px={px} styles={styles}
           />
-          <View style={styles.cardSep} />
-          <SelectRow label="SCALE" value={scale.toUpperCase()} onPress={nextScale} C={C} px={px} styles={styles} />
           <View style={styles.cardSep} />
           <SelectRow
             label="SPEED"

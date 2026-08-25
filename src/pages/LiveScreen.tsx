@@ -12,6 +12,25 @@ import { sx } from "../utils/sx";
 
 // Ported from f1-live/app/(tabs)/live.tsx
 
+// Measures rendered text width in the actual pixel font, via an offscreen
+// canvas — used to size the DRIVER column to fit the longest name/team text
+// currently in the data. (Each row renders its own independent CSS grid, so
+// letting the grid's own `max-content` size the column would size every
+// row *separately* off just that row's text, misaligning every row against
+// each other; computing one shared width up front and applying it
+// everywhere is what actually keeps rows aligned.)
+let measureCanvas: HTMLCanvasElement | null = null;
+function measureTextWidth(text: string, fontSizePx: number, fontFamily = '"PressStart2P", monospace'): number {
+  if (typeof document === "undefined") return text.length * fontSizePx * 0.7;
+  measureCanvas ??= document.createElement("canvas");
+  const ctx = measureCanvas.getContext("2d");
+  if (!ctx) return text.length * fontSizePx * 0.7;
+  ctx.font = `${fontSizePx}px ${fontFamily}`;
+  return ctx.measureText(text).width;
+}
+
+type ViewMode = "gap" | "interval";
+
 // ── Pulsing live dot ── (was RN Animated.loop; now a CSS keyframe, see index.css)
 function BlinkDot({ color }: { color: string }) {
   return <div className="blink-dot" style={{ width: 6, height: 6, backgroundColor: color }} />;
@@ -41,15 +60,14 @@ function SectorCell({ value, styles }: { value: number | null; styles: any }) {
 }
 
 type DriverItem = ReturnType<typeof useLiveRaceData>["rows"][number];
-type ViewMode = "gap" | "interval";
 
 // ── Dynamic column model ────────────────────────────────────────
 // Header and rows are both driven off this one array, so they can never
 // drift out of alignment, and hiding a column just drops its grid track.
 type LeaderColumn = {
   key: string;
-  track: string;
-  align?: "start" | "center";
+  track: string;             // grid-template-columns track for this column
+  align?: "start" | "center"; // cell content alignment (default center)
   header: ReactNode;
   cell: (d: DriverItem) => ReactNode;
 };
@@ -59,9 +77,10 @@ function buildColumns(opts: {
   quali: boolean;
   mode: ViewMode;
   onToggleGapInt: () => void;
+  driverColWidth: number;
   C: any; px: any; styles: any;
 }): LeaderColumn[] {
-  const { liveColumns, quali, mode, onToggleGapInt, C, px, styles } = opts;
+  const { liveColumns, quali, mode, onToggleGapInt, driverColWidth, C, px, styles } = opts;
   const cols: LeaderColumn[] = [];
 
   if (liveColumns.pos) {
@@ -76,9 +95,23 @@ function buildColumns(opts: {
     });
   }
 
+  // DRIVER — always shown: team-colour stripe + car livery + name/team.
+  // driverColWidth is precomputed once (measured from the actual current
+  // data) and applied identically to the header and every row, so the
+  // column ends exactly where the longest visible name/team ends — with no
+  // per-row size drift and no clipping of long names like "Aston Martin".
   cols.push({
-    key: "driver", track: "minmax(120px, 2fr)", align: "start",
-    header: <Text style={styles.colText}>DRIVER</Text>,
+    key: "driver", track: `${driverColWidth}px`, align: "start",
+    header: (
+      // Spacer matches the stripe+livery width in the data cell below, so
+      // "DRIVER" lines up with where every row's name starts — centering
+      // across the whole remaining column would drift off a short,
+      // left-aligned name like "NOR" since it doesn't fill the column.
+      <View style={{ flexDirection: "row", alignItems: "center", width: "100%" }}>
+        <View style={styles.driverHeaderSpacer} />
+        <Text style={styles.colText}>DRIVER</Text>
+      </View>
+    ),
     cell: (d) => {
       const livery = teamLiverySource(d.team);
       return (
@@ -89,8 +122,8 @@ function buildColumns(opts: {
           </View>
           <View style={styles.driverNameBlock}>
             <Text style={sx(px.h2, { color: d.teamColor || C.white })}>{d.short}</Text>
-            <Text style={sx(px.label, { color: C.greyDark, marginTop: 2, fontSize: 5 })} numberOfLines={1}>
-              {d.team.toUpperCase().slice(0, 10)}
+            <Text style={sx(px.label, styles.fs5, { color: C.greyDark, marginTop: 2 })} numberOfLines={1}>
+              {d.team.toUpperCase()}
             </Text>
           </View>
         </View>
@@ -98,6 +131,7 @@ function buildColumns(opts: {
     },
   });
 
+  // GAP — always shown; heading toggles gap <-> interval.
   cols.push({
     key: "gap", track: "minmax(48px, 1fr)",
     header: (
@@ -110,7 +144,7 @@ function buildColumns(opts: {
       const knockedOut = d.knockedOut === true;
       const nonRunning = d.status !== "RUN";
       return (
-        <Text style={sx(px.label, { color: knockedOut || nonRunning || gapText === "LEADER" ? C.accent : C.white, fontSize: 6 })} numberOfLines={1}>
+        <Text style={sx(px.label, styles.fs6, { color: knockedOut || nonRunning || gapText === "LEADER" ? C.accent : C.white })} numberOfLines={1}>
           {knockedOut ? "OUT" : nonRunning ? d.status : gapText === "LEADER" ? "LDR" : gapText}
         </Text>
       );
@@ -132,7 +166,7 @@ function buildColumns(opts: {
       cell: (d) => (
         <View style={{ alignItems: "center" }}>
           <Text style={sx(px.label, { color: C.grey })}>{d.pits}</Text>
-          <Text style={sx(px.label, { color: C.greyDark, fontSize: 5 })}>PIT</Text>
+          <Text style={sx(px.label, styles.fs5, { color: C.greyDark })}>PIT</Text>
         </View>
       ),
     });
@@ -140,10 +174,12 @@ function buildColumns(opts: {
 
   if (liveColumns.sectors) {
     if (quali) {
+      // In qualifying, sectors of the current lap matter less than the best
+      // lap — so the sectors slot collapses to a single BEST LAP column.
       cols.push({
         key: "bestlap", track: "minmax(60px, 1.5fr)",
         header: <Text style={styles.colText}>BEST LAP</Text>,
-        cell: (d) => <Text style={sx(px.mono, { fontSize: 7, color: C.white })} numberOfLines={1}>{formatLapTime(d.bestLapTime)}</Text>,
+        cell: (d) => <Text style={sx(px.mono, { color: C.white })} numberOfLines={1}>{formatLapTime(d.bestLapTime)}</Text>,
       });
     } else {
       for (let i = 0; i < 3; i++) {
@@ -156,6 +192,7 @@ function buildColumns(opts: {
     }
   }
 
+  // LAST then BEST (order swapped per request).
   if (liveColumns.last) {
     cols.push({
       key: "last", track: "minmax(50px, 1fr)",
@@ -351,6 +388,28 @@ export default function LiveScreen() {
   const totalLaps = useSse ? sseData.totalLaps : null;
   const raceControl = useSse ? sseData.raceControl : [];
 
+  // One shared DRIVER column width, measured from the actual current data
+  // (longest driver code / team name) plus the stripe+livery offset — see
+  // measureTextWidth's note on why this can't be delegated to the grid's
+  // own auto-sizing (rows are independent grids, so that sizes each row
+  // off only its own content and misaligns every row against the others).
+  const driverColWidth = useMemo(() => {
+    const offset = Number(styles.driverHeaderSpacer.width) || 0;
+    const codeSize = Number(px.h2.fontSize) || 10;
+    const teamSize = Number(styles.fs5.fontSize) || 6;
+    const headerSize = Number(styles.colText.fontSize) || 8;
+    let maxTextWidth = measureTextWidth("DRIVER", headerSize);
+    for (const row of liveData.rows) {
+      maxTextWidth = Math.max(maxTextWidth, measureTextWidth(row.short ?? "", codeSize));
+      maxTextWidth = Math.max(maxTextWidth, measureTextWidth((row.team ?? "").toUpperCase(), teamSize));
+    }
+    // Small safety margin: canvas measureText() and the browser's actual DOM
+    // text layout round slightly differently, especially for a bitmap-style
+    // font like this — without it, the longest name (e.g. "Red Bull Racing")
+    // can end up a couple px too tight and ellipsize.
+    return Math.max(120, Math.round(offset + maxTextWidth) + 10);
+  }, [liveData.rows, px, styles]);
+
   // Visible columns drive both the header and every row's grid template, so
   // they stay aligned and the layout reflows when the user toggles columns.
   const columns = useMemo(
@@ -359,9 +418,10 @@ export default function LiveScreen() {
       quali: isQuali && useSse,
       mode,
       onToggleGapInt: () => setMode((mo) => (mo === "gap" ? "interval" : "gap")),
+      driverColWidth,
       C, px, styles,
     }),
-    [liveColumns, isQuali, useSse, mode, C, px, styles],
+    [liveColumns, isQuali, useSse, mode, driverColWidth, C, px, styles],
   );
 
   const raceName = useSse
@@ -422,8 +482,8 @@ export default function LiveScreen() {
           { label: "RAIN", value: liveData.latestWeather?.rainfall ? "YES" : "NO" },
         ].map((w) => (
           <View key={w.label} style={styles.weatherItem}>
-            <Text style={sx(px.label, { color: C.greyDark, fontSize: 5 })}>{w.label}</Text>
-            <Text style={sx(px.label, { color: C.cyan, fontSize: 6 })}>{w.value}</Text>
+            <Text style={sx(px.label, styles.fs5, { color: C.greyDark })}>{w.label}</Text>
+            <Text style={sx(px.label, styles.fs6, { color: C.cyan })}>{w.value}</Text>
           </View>
         ))}
       </View>
@@ -445,7 +505,7 @@ export default function LiveScreen() {
               <DriverRow driver={item} columns={columns} C={C} styles={styles} />
               {cutoffAfter != null && index === cutoffAfter - 1 && (
                 <View style={styles.elimLine}>
-                  <Text style={sx(px.label, { color: C.accent, fontSize: 6 })}>▼ ELIMINATION ▼</Text>
+                  <Text style={sx(px.label, styles.fs6, { color: C.accent })}>▼ ELIMINATION ▼</Text>
                 </View>
               )}
             </>
@@ -504,8 +564,15 @@ function createStyles(C: any, scale: number) {
     cellCenter: { justifyContent: "center", textAlign: "center" } as CSSProperties,
     cellStart: { justifyContent: "flex-start" } as CSSProperties,
 
-    colText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey } as CSSProperties,
+    colText: { fontFamily: "PressStart2P", fontSize: m(6), color: C.grey } as CSSProperties,
     rowSep: { height: 1, backgroundColor: C.border } as CSSProperties,
+
+    // Scaled replacements for what used to be raw fontSize:5/6/7 overrides
+    // scattered through the file — those bypassed scaling entirely, which is
+    // why numbers/labels weren't growing with the rest of the UI.
+    fs5: { fontSize: m(5) } as CSSProperties,
+    fs6: { fontSize: m(6) } as CSSProperties,
+    fs7: { fontSize: m(7) } as CSSProperties,
 
     elimLine: {
       alignItems: "center", justifyContent: "center", paddingTop: m(3), paddingBottom: m(3),
@@ -518,12 +585,16 @@ function createStyles(C: any, scale: number) {
     teamStripe: { width: 3, height: m(38), flexShrink: 0 } as CSSProperties,
     liveryWrap: { width: m(30), height: m(20), alignItems: "center", justifyContent: "center", flexShrink: 0 } as CSSProperties,
     livery: { width: m(30), height: m(20) } as CSSProperties,
+    // Matches teamStripe + gap + liveryWrap + gap exactly, so the "DRIVER"
+    // heading text can sit centered over just the name — not the whole
+    // stripe+livery+name cluster — the same way the data rows read.
+    driverHeaderSpacer: { width: 3 + m(6) * 2 + m(30), flexShrink: 0 } as CSSProperties,
 
     tireBadge: { width: 38, borderWidth: 1, alignItems: "center", paddingTop: m(2), paddingBottom: m(2) } as CSSProperties,
-    tireCompound: { fontFamily: "PressStart2P", fontSize: 9, fontWeight: 900 } as CSSProperties,
-    tireAge: { fontFamily: "PressStart2P", fontSize: 6, color: "#888", marginTop: 1 } as CSSProperties,
+    tireCompound: { fontFamily: "PressStart2P", fontSize: m(9), fontWeight: 900 } as CSSProperties,
+    tireAge: { fontFamily: "PressStart2P", fontSize: m(6), color: "#888", marginTop: 1 } as CSSProperties,
 
-    sectorText: { fontFamily: "PressStart2P", fontSize: 6, color: C.grey } as CSSProperties,
-    lapText: { fontFamily: "PressStart2P", fontSize: 6, color: C.white } as CSSProperties,
+    sectorText: { fontFamily: "PressStart2P", fontSize: m(6), color: C.grey } as CSSProperties,
+    lapText: { fontFamily: "PressStart2P", fontSize: m(6), color: C.white } as CSSProperties,
   });
 }
