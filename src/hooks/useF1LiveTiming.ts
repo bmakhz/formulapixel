@@ -318,6 +318,15 @@ export function useF1LiveTiming(baseUrl: string | null, enabled: boolean) {
       .sort((a, b) => (b.utc > a.utc ? 1 : b.utc < a.utc ? -1 : 0));
   }, [tick]);
 
+  // Raw CarData category, unmodified — still deflate-compressed at this
+  // point. Only inflated on demand (see useCarTelemetry) since it refreshes
+  // several times a second and most of that work is wasted unless a driver
+  // row is actually expanded. F1 only streams it during a live session, so
+  // this stays null outside one (mirrors the ".z" suffix some relays keep).
+  const carDataRaw = useMemo(() => {
+    return stateRef.current?.["CarData.z"] ?? stateRef.current?.CarData ?? null;
+  }, [tick]);
+
   return {
     rows,
     top3: rows.slice(0, 3),
@@ -327,6 +336,7 @@ export function useF1LiveTiming(baseUrl: string | null, enabled: boolean) {
     trackStatus,
     raceControl,
     session,
+    carDataRaw,
     connected,
     isLoading: enabled && !connected && rows.length === 0,
     hasError,

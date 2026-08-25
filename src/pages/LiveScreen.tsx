@@ -4,6 +4,7 @@ import {
 } from "../components/primitives";
 import { useActiveRaceSession, useLiveRaceData, formatLapTime, getRaceStatus } from "../hooks/useOpenF1";
 import { useF1LiveTiming, type RaceControlItem } from "../hooks/useF1LiveTiming";
+import { useCarTelemetry, drsLabel } from "../hooks/useCarTelemetry";
 import { useThemeTokens } from "../theme";
 import { useSettingsStore, type LiveColumns } from "../store/useSettingsStore";
 import { formatSpeed, formatTemperature } from "../utils/unitConversion";
@@ -227,20 +228,81 @@ function LeaderHeader({ columns, styles }: { columns: LeaderColumn[]; styles: an
   );
 }
 
-function DriverRow({ driver, columns, C, styles }: { driver: DriverItem; columns: LeaderColumn[]; C: any; styles: any }) {
+function DriverRow({
+  driver, columns, expanded, onClick, C, styles,
+}: { driver: DriverItem; columns: LeaderColumn[]; expanded: boolean; onClick: () => void; C: any; styles: any }) {
   const knockedOut = driver.knockedOut === true;
   const cutoff = driver.cutoff === true && !knockedOut;
   const nonRunning = driver.status !== "RUN";
-  const rowBg = cutoff ? C.accentDim : nonRunning || knockedOut ? C.bgPanel : C.bg;
+  const rowBg = expanded ? C.bgCard : cutoff ? C.accentDim : nonRunning || knockedOut ? C.bgPanel : C.bg;
   const rowOpacity = knockedOut ? 0.4 : nonRunning ? 0.65 : 1;
 
   return (
-    <View style={sx(styles.gridRow, { gridTemplateColumns: gridTemplate(columns), backgroundColor: rowBg, opacity: rowOpacity })}>
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onClick={onClick}
+      style={sx(styles.gridRow, { gridTemplateColumns: gridTemplate(columns), backgroundColor: rowBg, opacity: rowOpacity })}
+    >
       {columns.map((c) => (
         <View key={c.key} style={sx(styles.cell, c.align === "start" ? styles.cellStart : styles.cellCenter)}>
           {c.cell(driver)}
         </View>
       ))}
+    </TouchableOpacity>
+  );
+}
+
+// ── Per-driver car telemetry (from CarData.z, only while live) ──────────
+function TelBar({ label, value, color, C, px, styles }: { label: string; value: number | null; color: string; C: any; px: any; styles: any }) {
+  const pct = value ?? 0;
+  return (
+    <View style={styles.telBarRow}>
+      <Text style={sx(px.label, styles.fs5, { color: C.grey, width: 28 })}>{label}</Text>
+      <View style={styles.telBarTrack}>
+        <View style={sx(styles.telBarFill, { width: `${pct}%`, backgroundColor: color })} />
+      </View>
+      <Text style={sx(px.label, styles.fs5, { color, width: 26, textAlign: "right" })}>
+        {value == null ? "--" : `${Math.round(pct)}%`}
+      </Text>
+    </View>
+  );
+}
+
+function TelStat({ label, value, color, C, px, styles }: { label: string; value: string; color: string; C: any; px: any; styles: any }) {
+  return (
+    <View style={styles.telStat}>
+      <Text style={sx(px.label, styles.fs5, { color: C.greyDark })}>{label}</Text>
+      <Text style={sx(px.h3, { color })}>{value}</Text>
+    </View>
+  );
+}
+
+function TelemetryPanel({
+  driver, telemetry, loading, live, C, px, styles,
+}: { driver: DriverItem; telemetry: import("../hooks/useCarTelemetry").CarChannels | null; loading: boolean; live: boolean; C: any; px: any; styles: any }) {
+  return (
+    <View style={sx(styles.telPanel, { borderColor: driver.teamColor })}>
+      {!live ? (
+        <Text style={sx(px.label, styles.fs5, { color: C.greyDark })}>TELEMETRY ONLY AVAILABLE DURING A LIVE SESSION</Text>
+      ) : !telemetry ? (
+        <Text style={sx(px.label, styles.fs5, { color: C.greyDark })}>{loading ? "DECODING TELEMETRY..." : "WAITING FOR CAR DATA..."}</Text>
+      ) : (
+        <>
+          <View style={styles.telStatsRow}>
+            <TelStat label="SPEED" value={telemetry.speed != null ? `${telemetry.speed}` : "--"} color={C.white} C={C} px={px} styles={styles} />
+            <TelStat label="GEAR" value={telemetry.gear != null ? String(telemetry.gear) : "-"} color={C.white} C={C} px={px} styles={styles} />
+            <TelStat label="RPM" value={telemetry.rpm != null ? String(telemetry.rpm) : "--"} color={C.white} C={C} px={px} styles={styles} />
+            <TelStat
+              label="DRS"
+              value={drsLabel(telemetry.drs)}
+              color={telemetry.drs != null && drsLabel(telemetry.drs) === "OPEN" ? C.green : C.grey}
+              C={C} px={px} styles={styles}
+            />
+          </View>
+          <TelBar label="THR" value={telemetry.throttle} color={C.green} C={C} px={px} styles={styles} />
+          <TelBar label="BRK" value={telemetry.brake} color={C.accent} C={C} px={px} styles={styles} />
+        </>
+      )}
     </View>
   );
 }
@@ -351,6 +413,7 @@ export default function LiveScreen() {
   const { C, px, mode: themeMode, scaleValue } = useThemeTokens();
   const styles = useMemo(() => createStyles(C, scaleValue), [C, scaleValue]);
   const [mode, setMode] = useState<ViewMode>("gap");
+  const [expandedDriver, setExpandedDriver] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -387,6 +450,12 @@ export default function LiveScreen() {
 
   const totalLaps = useSse ? sseData.totalLaps : null;
   const raceControl = useSse ? sseData.raceControl : [];
+
+  // Car telemetry only exists on the live SSE feed (CarData.z isn't part of
+  // OpenF1's historical/fallback data), and only decodes while a row is
+  // actually expanded.
+  const carDataRaw = useSse ? sseData.carDataRaw : null;
+  const { channels: telemetry, loading: telemetryLoading } = useCarTelemetry(carDataRaw, expandedDriver);
 
   // One shared DRIVER column width, measured from the actual current data
   // (longest driver code / team name) plus the stripe+livery offset — see
@@ -500,16 +569,28 @@ export default function LiveScreen() {
         <FlatList
           data={liveData.rows}
           keyExtractor={(d) => String(d.driverNumber)}
-          renderItem={({ item, index }) => (
-            <>
-              <DriverRow driver={item} columns={columns} C={C} styles={styles} />
-              {cutoffAfter != null && index === cutoffAfter - 1 && (
-                <View style={styles.elimLine}>
-                  <Text style={sx(px.label, styles.fs6, { color: C.accent })}>▼ ELIMINATION ▼</Text>
-                </View>
-              )}
-            </>
-          )}
+          renderItem={({ item, index }) => {
+            const expanded = expandedDriver === item.driverNumber;
+            return (
+              <>
+                <DriverRow
+                  driver={item}
+                  columns={columns}
+                  expanded={expanded}
+                  onClick={() => setExpandedDriver((cur) => (cur === item.driverNumber ? null : item.driverNumber))}
+                  C={C} styles={styles}
+                />
+                {expanded && (
+                  <TelemetryPanel driver={item} telemetry={telemetry} loading={telemetryLoading} live={useSse} C={C} px={px} styles={styles} />
+                )}
+                {cutoffAfter != null && index === cutoffAfter - 1 && (
+                  <View style={styles.elimLine}>
+                    <Text style={sx(px.label, styles.fs6, { color: C.accent })}>▼ ELIMINATION ▼</Text>
+                  </View>
+                )}
+              </>
+            );
+          }}
           contentContainerStyle={{ paddingBottom: 12 }}
           ItemSeparatorComponent={() => <View style={styles.rowSep} />}
         />
@@ -596,5 +677,17 @@ function createStyles(C: any, scale: number) {
 
     sectorText: { fontFamily: "PressStart2P", fontSize: m(6), color: C.grey } as CSSProperties,
     lapText: { fontFamily: "PressStart2P", fontSize: m(6), color: C.white } as CSSProperties,
+
+    // Expandable per-driver car telemetry panel (tap a row to open).
+    telPanel: {
+      borderLeftWidth: 3, borderTopWidth: 1, borderBottomWidth: 1, borderRightWidth: 0,
+      borderStyle: "solid", backgroundColor: C.bgCard,
+      paddingLeft: m(12), paddingRight: m(12), paddingTop: m(8), paddingBottom: m(8), gap: m(6),
+    } as CSSProperties,
+    telStatsRow: { flexDirection: "row", justifyContent: "space-between", paddingBottom: m(2) } as CSSProperties,
+    telStat: { alignItems: "center", gap: m(2) } as CSSProperties,
+    telBarRow: { flexDirection: "row", alignItems: "center", gap: m(6) } as CSSProperties,
+    telBarTrack: { flex: 1, height: m(8), backgroundColor: C.bgPanel, borderWidth: 1, borderColor: C.border } as CSSProperties,
+    telBarFill: { height: "100%" } as CSSProperties,
   });
 }
